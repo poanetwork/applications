@@ -15,6 +15,8 @@ let DutchTokenTransfer = artifacts.require('./TokenTransfer')
 let DutchTokenTransferFrom = artifacts.require('./TokenTransferFrom')
 let DutchTokenApprove = artifacts.require('./TokenApprove')
 
+let fs = require('fs')
+
 // Utils
 let RegistryUtils = artifacts.require('./utils/TestUtils')
 
@@ -31,6 +33,7 @@ contract('DutchCrowdsale', function (accounts) {
 
   let storage
   let exec
+  let networkID
 
   let execAdmin = accounts[0]
   let updater = accounts[1]
@@ -110,6 +113,7 @@ contract('DutchCrowdsale', function (accounts) {
       { from: execAdmin }
     ).should.be.fulfilled
     await exec.changeRegistryExecId(registryExecID, { from: execAdmin }).should.be.fulfilled
+    networkID = await web3.version.network
   })
 
   it('should correctly set up script exec', async () => {
@@ -198,9 +202,29 @@ contract('DutchCrowdsale', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       events[0].event.should.be.eq('ApplicationExecution')
+
+      //generates .env variables:
+      let envVarsContent = ""
+      envVarsContent += `REACT_APP_REGISTRY_STORAGE_ADDRESS='{"${networkID}":"${storage.address}"}'\n`
+      envVarsContent += `REACT_APP_INIT_REGISTRY_ADDRESS='{"${networkID}":"${initRegistry.address}"}'\n`
+      envVarsContent += `REACT_APP_APP_CONSOLE_ADDRESS='{"${networkID}":"${appConsole.address}"}'\n`
+      envVarsContent += `REACT_APP_VERSION_CONSOLE_ADDRESS='{"${networkID}":"${versionConsole.address}"}'\n`
+      envVarsContent += `REACT_APP_IMPLEMENTATION_CONSOLE_ADDRESS='{"${networkID}":"${implConsole.address}"}'\n`
+      envVarsContent += `REACT_APP_SCRIPT_EXEC_ADDRESS='{"${networkID}":"${exec.address}"}'\n`
+      envVarsContent += `REACT_APP_MINTED_CAPPED_CROWDSALE_INIT_CROWDSALE_ADDRESS='{"${networkID}":"0x0"}'\n`
+      envVarsContent += `REACT_APP_MINTED_CAPPED_CROWDSALE_TOKEN_CONSOLE_ADDRESS='{"${networkID}":"0x0"}'\n`
+      envVarsContent += `REACT_APP_MINTED_CAPPED_CROWDSALE_CROWDSALE_CONSOLE_ADDRESS='{"${networkID}":"0x0"}'\n`
+      envVarsContent += `REACT_APP_MINTED_CAPPED_CROWDSALE_CROWDSALE_BUY_TOKENS_ADDRESS='{"${networkID}":"0x0"}'\n`
+      envVarsContent += `REACT_APP_DUTCH_AUCTION_CROWDSALE_INIT_CROWDSALE_ADDRESS='{"${networkID}":"${initCrowdsale.address}"}'\n`
+      envVarsContent += `REACT_APP_DUTCH_AUCTION_CROWDSALE_TOKEN_CONSOLE_ADDRESS='{"${networkID}":"${tokenConsole.address}"}'\n`
+      envVarsContent += `REACT_APP_DUTCH_AUCTION_CROWDSALE_CROWDSALE_CONSOLE_ADDRESS='{"${networkID}":"${crowdsaleConsole.address}"}'\n`
+      envVarsContent += `REACT_APP_DUTCH_AUCTION_CROWDSALE_CROWDSALE_BUY_TOKENS_ADDRESS='{"${networkID}":"${crowdsaleBuy.address}"}'\n`
+      console.log("envVarsContent:")
+      console.log(envVarsContent)
+      fs.writeFileSync("./.env", envVarsContent)
     })
 
-    describe('#getAppLatestInfo', async () => {
+    describe.only('#getAppLatestInfo', async () => {
 
       let appLatest
 
