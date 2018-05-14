@@ -36,6 +36,7 @@ library ArrayUtils {
   }
 }
 
+
 library MemoryBuffers {
 
   using Exceptions for bytes32;
@@ -229,53 +230,48 @@ library MemoryBuffers {
   }
 }
 
-contract MockAdminContract {
+library TokenFunctionsMock {
 
   using MemoryBuffers for uint;
   using ArrayUtils for bytes32[];
   using Exceptions for bytes32;
 
-  // Storage location of the minimum amount of tokens allowed to be purchased
-  bytes32 internal constant CROWDSALE_MINIMUM_CONTRIBUTION = keccak256("crowdsale_min_cap");
+  /// CROWDSALE STORAGE ///
 
-  // Storage location of the CROWDSALE_TIERS index (-1) of the current tier. If zero, no tier is currently active
-  bytes32 internal constant CROWDSALE_CURRENT_TIER = keccak256("crowdsale_current_tier");
+  // Whether or not the crowdsale is post-purchase
+  bytes32 internal constant CROWDSALE_IS_FINALIZED = keccak256("crowdsale_is_finalized");
 
-  // Storage location of the end time of the current tier. Purchase attempts beyond this time will update the current tier (if another is available)
-  bytes32 internal constant CURRENT_TIER_ENDS_AT = keccak256("crowdsale_tier_ends_at");
+  /// TOKEN STORAGE ///
 
-  // Storage location of the total number of tokens remaining for purchase in the current tier
-  bytes32 internal constant CURRENT_TIER_TOKENS_REMAINING = keccak256("crowdsale_tier_tokens_remaining");
+  // Storage seed for user balances mapping
+  bytes32 internal constant TOKEN_BALANCES = keccak256("token_balances");
 
-  // MOCK FUNCTION - used to advance the 'current' stored tier to another tier
-  function advanceToTier(uint _tier_index) public pure returns (bytes32[] memory store_data) {
-    // Create memory buffer for return data
+  // Storage seed for token 'transfer agent' status for any address
+  // Transfer agents can transfer tokens, even if the crowdsale has not yet been finalized
+  bytes32 internal constant TOKEN_TRANSFER_AGENTS = keccak256("token_transfer_agents");
+
+  // MOCK FUNCTION - sets the transfer agent status of the passed in address
+  function setTransferAgentStatus(address _agent, bool _is_transfer_agent) public pure returns (bytes32[] memory store_data) {
     uint ptr = MemoryBuffers.stBuff(0, 0);
+    ptr.stPush(keccak256(keccak256(_agent), TOKEN_TRANSFER_AGENTS), _is_transfer_agent ? bytes32(1) : bytes32(0));
 
-    ptr.stPush(CROWDSALE_CURRENT_TIER, bytes32(_tier_index));
+    // Get bytes32[] representation of storage buffer
+    store_data = ptr.getBuffer();
+  }
+
+  // MOCK FUNCTION - unlocks the token for transfer
+  function unlockToken() public pure returns (bytes32[] memory store_data) {
+    uint ptr = MemoryBuffers.stBuff(0, 0);
+    ptr.stPush(CROWDSALE_IS_FINALIZED, bytes32(1));
 
     // Get bytes32[] storage request array from buffer
     store_data = ptr.getBuffer();
   }
 
-  // MOCK FUNCTION - used to set the current tier's remaining tokens
-  function setTierTokensRemaining(uint _val) public pure returns (bytes32[] memory store_data) {
-    // Create memory buffer for return data
+  // MOCK FUNCTION - sets the target's token balance
+  function setBalance(address _target, uint _amt) public pure returns (bytes32[] memory store_data) {
     uint ptr = MemoryBuffers.stBuff(0, 0);
-
-    ptr.stPush(CURRENT_TIER_TOKENS_REMAINING, bytes32(_val));
-
-    // Get bytes32[] storage request array from buffer
-    store_data = ptr.getBuffer();
-  }
-
-  // MOCK FUNCTION - used to update the global minimum contribution of a sale
-  function updateGlobalMin(uint _new_min_contribution) public pure returns (bytes32[] memory store_data) {
-    // Create memory buffer for return data
-    uint ptr = MemoryBuffers.stBuff(0, 0);
-
-    // Place new crowdsale minimum token contribution cap and min cap storage location in buffer
-    ptr.stPush(CROWDSALE_MINIMUM_CONTRIBUTION, bytes32(_new_min_contribution));
+    ptr.stPush(keccak256(keccak256(_target), TOKEN_BALANCES), bytes32(_amt));
 
     // Get bytes32[] storage request array from buffer
     store_data = ptr.getBuffer();

@@ -238,32 +238,24 @@ contract MockAdminContract {
   // Storage location of the minimum amount of tokens allowed to be purchased
   bytes32 internal constant CROWDSALE_MINIMUM_CONTRIBUTION = keccak256("crowdsale_min_cap");
 
-  // Storage location of the CROWDSALE_TIERS index (-1) of the current tier. If zero, no tier is currently active
-  bytes32 internal constant CROWDSALE_CURRENT_TIER = keccak256("crowdsale_current_tier");
+  // Storage location for the amount of tokens still available for purchase in this crowdsale
+  bytes32 internal constant TOKENS_REMAINING = keccak256("crowdsale_tokens_remaining");
 
-  // Storage location of the end time of the current tier. Purchase attempts beyond this time will update the current tier (if another is available)
-  bytes32 internal constant CURRENT_TIER_ENDS_AT = keccak256("crowdsale_tier_ends_at");
+  // Whether or not the crowdsale is whitelist-enabled
+  bytes32 internal constant SALE_IS_WHITELISTED = keccak256("crowdsale_is_whitelisted");
 
-  // Storage location of the total number of tokens remaining for purchase in the current tier
-  bytes32 internal constant CURRENT_TIER_TOKENS_REMAINING = keccak256("crowdsale_tier_tokens_remaining");
+  // Storage location of the token/wei rate at the beginning of the sale
+  bytes32 internal constant STARTING_SALE_RATE = keccak256("crowdsale_start_rate");
 
-  // MOCK FUNCTION - used to advance the 'current' stored tier to another tier
-  function advanceToTier(uint _tier_index) public pure returns (bytes32[] memory store_data) {
+  // Storage location of the token/wei rate at the beginning of the sale
+  bytes32 internal constant ENDING_SALE_RATE = keccak256("crowdsale_end_rate");
+
+  // MOCK FUNCTION - used to set the remaining tokens for sale
+  function setTokensRemaining(uint _val) public pure returns (bytes32[] memory store_data) {
     // Create memory buffer for return data
     uint ptr = MemoryBuffers.stBuff(0, 0);
 
-    ptr.stPush(CROWDSALE_CURRENT_TIER, bytes32(_tier_index));
-
-    // Get bytes32[] storage request array from buffer
-    store_data = ptr.getBuffer();
-  }
-
-  // MOCK FUNCTION - used to set the current tier's remaining tokens
-  function setTierTokensRemaining(uint _val) public pure returns (bytes32[] memory store_data) {
-    // Create memory buffer for return data
-    uint ptr = MemoryBuffers.stBuff(0, 0);
-
-    ptr.stPush(CURRENT_TIER_TOKENS_REMAINING, bytes32(_val));
+    ptr.stPush(TOKENS_REMAINING, bytes32(_val));
 
     // Get bytes32[] storage request array from buffer
     store_data = ptr.getBuffer();
@@ -276,6 +268,29 @@ contract MockAdminContract {
 
     // Place new crowdsale minimum token contribution cap and min cap storage location in buffer
     ptr.stPush(CROWDSALE_MINIMUM_CONTRIBUTION, bytes32(_new_min_contribution));
+
+    // Get bytes32[] storage request array from buffer
+    store_data = ptr.getBuffer();
+  }
+
+  // MOCK FUNCTION - used to set whether or not the sale is whitelisted
+  function setSaleIsWhitelisted(bool _is_whitelisted) public pure returns (bytes32[] memory store_data) {
+    // Create memory buffer for return data
+    uint ptr = MemoryBuffers.stBuff(0, 0);
+
+    ptr.stPush(SALE_IS_WHITELISTED, bytes32(_is_whitelisted ? bytes32(1) : bytes32(0)));
+
+    // Get bytes32[] storage request array from buffer
+    store_data = ptr.getBuffer();
+  }
+
+  // MOCK FUNCTION - used to update the sale's prices
+  function setStartAndEndPrices(uint _start, uint _end) public pure returns (bytes32[] memory store_data) {
+    // Create memory buffer for return data
+    uint ptr = MemoryBuffers.stBuff(0, 0);
+
+    ptr.stPush(STARTING_SALE_RATE, bytes32(_start));
+    ptr.stPush(ENDING_SALE_RATE, bytes32(_end));
 
     // Get bytes32[] storage request array from buffer
     store_data = ptr.getBuffer();
