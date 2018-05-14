@@ -18,7 +18,7 @@ let MintedCappedTokenApprove = artifacts.require('./TokenApprove')
 let fs = require('fs')
 
 // Utils
-let RegistryUtils = artifacts.require('./utils/RegistryUtils')
+let RegistryUtils = artifacts.require('./utils/TestUtils')
 
 function hexStrEquals(hex, expected) {
   return web3.toAscii(hex).substring(0, expected.length) == expected;
