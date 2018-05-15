@@ -215,10 +215,13 @@ contract('DutchCrowdsale', function (accounts) {
       envVarsContent += `REACT_APP_MINTED_CAPPED_CROWDSALE_TOKEN_CONSOLE_ADDRESS='{"${networkID}":"0x0"}'\n`
       envVarsContent += `REACT_APP_MINTED_CAPPED_CROWDSALE_CROWDSALE_CONSOLE_ADDRESS='{"${networkID}":"0x0"}'\n`
       envVarsContent += `REACT_APP_MINTED_CAPPED_CROWDSALE_CROWDSALE_BUY_TOKENS_ADDRESS='{"${networkID}":"0x0"}'\n`
-      envVarsContent += `REACT_APP_DUTCH_AUCTION_CROWDSALE_INIT_CROWDSALE_ADDRESS='{"${networkID}":"${initCrowdsale.address}"}'\n`
-      envVarsContent += `REACT_APP_DUTCH_AUCTION_CROWDSALE_TOKEN_CONSOLE_ADDRESS='{"${networkID}":"${tokenConsole.address}"}'\n`
-      envVarsContent += `REACT_APP_DUTCH_AUCTION_CROWDSALE_CROWDSALE_CONSOLE_ADDRESS='{"${networkID}":"${crowdsaleConsole.address}"}'\n`
-      envVarsContent += `REACT_APP_DUTCH_AUCTION_CROWDSALE_CROWDSALE_BUY_TOKENS_ADDRESS='{"${networkID}":"${crowdsaleBuy.address}"}'\n`
+	  envVarsContent += `REACT_APP_DUTCH_CROWDSALE_INIT_CROWDSALE_ADDRESS='{"${networkID}":"${initCrowdsale.address}"}'\n`
+	  envVarsContent += `REACT_APP_DUTCH_CROWDSALE_TOKEN_CONSOLE_ADDRESS='{"${networkID}":"${tokenConsole.address}"}'\n`
+	  envVarsContent += `REACT_APP_DUTCH_CROWDSALE_CROWDSALE_CONSOLE_ADDRESS='{"${networkID}":"${crowdsaleConsole.address}"}'\n`
+	  envVarsContent += `REACT_APP_DUTCH_CROWDSALE_CROWDSALE_BUY_TOKENS_ADDRESS='{"${networkID}":"${crowdsaleBuy.address}"}'\n`
+	  envVarsContent += `REACT_APP_MINTED_CAPPED_CROWDSALE_APP_NAME='MintedCappedCrowdsale'\n`
+	  envVarsContent += `REACT_APP_DUTCH_CROWDSALE_APP_NAME='DutchCrowdsale'\n`
+	  envVarsContent += `REACT_APP_INFURA_TOKEN='kEpzZR9fIyO3a8gTqJcI'\n`
       console.log("envVarsContent:")
       console.log(envVarsContent)
       fs.writeFileSync("./.env", envVarsContent)
