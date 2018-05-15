@@ -2,8 +2,8 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="b2f670db-c015-48d2-8f5d-8dc98d63b4a6" name="Default" comment="">
-      <change beforePath="$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/deploy_crowdsale_test.js" afterPath="$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/deploy_crowdsale_test.js" />
-      <change beforePath="$PROJECT_DIR$/TokenWizard/crowdsale/MintedCappedCrowdsale/test/deploy_crowdsale_test.js" afterPath="$PROJECT_DIR$/TokenWizard/crowdsale/MintedCappedCrowdsale/test/deploy_crowdsale_test.js" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" afterPath="$PROJECT_DIR$/.gitignore" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" afterPath="$PROJECT_DIR$/.idea/workspace.xml" />
     </list>
     <ignored path="$PROJECT_DIR$/.tmp/" />
     <ignored path="$PROJECT_DIR$/temp/" />
@@ -17,11 +17,21 @@
   </component>
   <component name="FileEditorManager">
     <leaf>
-      <file leaf-file-name="deploy_crowdsale_test.js" pinned="false" current-in-tab="true">
+      <file leaf-file-name="deploy_crowdsale_test.js" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/deploy_crowdsale_test.js">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="365">
-              <caret line="229" column="52" lean-forward="true" selection-start-line="229" selection-start-column="52" selection-end-line="229" selection-end-column="52" />
+            <state relative-caret-position="65">
+              <caret line="209" column="7" lean-forward="true" selection-start-line="209" selection-start-column="7" selection-end-line="209" selection-end-column="7" />
+              <folding />
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file leaf-file-name=".gitignore" pinned="false" current-in-tab="true">
+        <entry file="file://$PROJECT_DIR$/.gitignore">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="30">
+              <caret line="2" column="9" lean-forward="true" selection-start-line="2" selection-start-column="9" selection-end-line="2" selection-end-column="9" />
               <folding />
             </state>
           </provider>
@@ -37,6 +47,7 @@
       <list>
         <option value="$PROJECT_DIR$/TokenWizard/crowdsale/MintedCappedCrowdsale/test/deploy_crowdsale_test.js" />
         <option value="$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/deploy_crowdsale_test.js" />
+        <option value="$PROJECT_DIR$/.gitignore" />
       </list>
     </option>
   </component>
@@ -53,9 +64,9 @@
     <sorting>DEFINITION_ORDER</sorting>
   </component>
   <component name="ProjectFrameBounds">
-    <option name="x" value="715" />
-    <option name="y" value="23" />
-    <option name="width" value="725" />
+    <option name="x" value="286" />
+    <option name="y" value="25" />
+    <option name="width" value="1154" />
     <option name="height" value="787" />
   </component>
   <component name="ProjectInspectionProfilesVisibleTreeState">
@@ -101,27 +112,6 @@
               <item name="auth-os-applications" type="462c0819:PsiDirectoryNode" />
               <item name="TokenWizard" type="462c0819:PsiDirectoryNode" />
             </path>
-            <path>
-              <item name="auth-os-applications" type="b2602c69:ProjectViewProjectNode" />
-              <item name="auth-os-applications" type="462c0819:PsiDirectoryNode" />
-              <item name="TokenWizard" type="462c0819:PsiDirectoryNode" />
-              <item name="crowdsale" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="auth-os-applications" type="b2602c69:ProjectViewProjectNode" />
-              <item name="auth-os-applications" type="462c0819:PsiDirectoryNode" />
-              <item name="TokenWizard" type="462c0819:PsiDirectoryNode" />
-              <item name="crowdsale" type="462c0819:PsiDirectoryNode" />
-              <item name="DutchCrowdsale" type="462c0819:PsiDirectoryNode" />
-            </path>
-            <path>
-              <item name="auth-os-applications" type="b2602c69:ProjectViewProjectNode" />
-              <item name="auth-os-applications" type="462c0819:PsiDirectoryNode" />
-              <item name="TokenWizard" type="462c0819:PsiDirectoryNode" />
-              <item name="crowdsale" type="462c0819:PsiDirectoryNode" />
-              <item name="DutchCrowdsale" type="462c0819:PsiDirectoryNode" />
-              <item name="test" type="462c0819:PsiDirectoryNode" />
-            </path>
           </expand>
           <select />
         </subPane>
@@ -163,25 +153,25 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1526358765559</updated>
-      <workItem from="1526358766723" duration="310000" />
+      <workItem from="1526358766723" duration="524000" />
     </task>
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="310000" />
+    <option name="totallyTimeSpent" value="524000" />
   </component>
   <component name="ToolWindowManager">
-    <frame x="715" y="23" width="725" height="787" extended-state="0" />
+    <frame x="286" y="25" width="1154" height="787" extended-state="0" />
     <editor active="true" />
     <layout>
-      <window_info id="Project" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" show_stripe_button="true" weight="0.09375" sideWeight="0.88659793" order="0" side_tool="false" content_ui="combo" />
+      <window_info id="Project" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" show_stripe_button="true" weight="0.3168579" sideWeight="0.88659793" order="0" side_tool="false" content_ui="combo" />
       <window_info id="TODO" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.3283582" sideWeight="0.5" order="6" side_tool="false" content_ui="tabs" />
       <window_info id="Docker" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="false" weight="0.33" sideWeight="0.5" order="10" side_tool="false" content_ui="tabs" />
       <window_info id="Event Log" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.33" sideWeight="0.5" order="7" side_tool="true" content_ui="tabs" />
       <window_info id="Run" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.33" sideWeight="0.5" order="2" side_tool="false" content_ui="tabs" />
       <window_info id="Version Control" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.32889965" sideWeight="0.5" order="8" side_tool="false" content_ui="tabs" />
       <window_info id="Structure" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.24947146" sideWeight="0.4864865" order="1" side_tool="false" content_ui="tabs" />
-      <window_info id="Terminal" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" show_stripe_button="true" weight="0.16591929" sideWeight="0.5" order="9" side_tool="false" content_ui="tabs" />
+      <window_info id="Terminal" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" show_stripe_button="true" weight="0.26756352" sideWeight="0.5" order="9" side_tool="false" content_ui="tabs" />
       <window_info id="Debug" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.4" sideWeight="0.5" order="3" side_tool="false" content_ui="tabs" />
       <window_info id="Favorites" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.22692037" sideWeight="0.11340206" order="2" side_tool="true" content_ui="tabs" />
       <window_info id="Cvs" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.25" sideWeight="0.5" order="4" side_tool="false" content_ui="tabs" />
@@ -214,8 +204,16 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/deploy_crowdsale_test.js">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="365">
-          <caret line="229" column="52" lean-forward="true" selection-start-line="229" selection-start-column="52" selection-end-line="229" selection-end-column="52" />
+        <state relative-caret-position="65">
+          <caret line="209" column="7" lean-forward="true" selection-start-line="209" selection-start-column="7" selection-end-line="209" selection-end-column="7" />
+          <folding />
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/.gitignore">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="30">
+          <caret line="2" column="9" lean-forward="true" selection-start-line="2" selection-start-column="9" selection-end-line="2" selection-end-column="9" />
           <folding />
         </state>
       </provider>
