@@ -204,24 +204,34 @@ contract('MintedCappedCrowdsale', function (accounts) {
       events[0].event.should.be.eq('ApplicationExecution')
 
       //generates .env variables:
-      let envVarsContent = ""
-      envVarsContent += `REACT_APP_REGISTRY_STORAGE_ADDRESS='{"${networkID}":"${storage.address}"}'\n`
-      envVarsContent += `REACT_APP_INIT_REGISTRY_ADDRESS='{"${networkID}":"${initRegistry.address}"}'\n`
-      envVarsContent += `REACT_APP_APP_CONSOLE_ADDRESS='{"${networkID}":"${appConsole.address}"}'\n`
-      envVarsContent += `REACT_APP_VERSION_CONSOLE_ADDRESS='{"${networkID}":"${versionConsole.address}"}'\n`
-      envVarsContent += `REACT_APP_IMPLEMENTATION_CONSOLE_ADDRESS='{"${networkID}":"${implConsole.address}"}'\n`
-      envVarsContent += `REACT_APP_SCRIPT_EXEC_ADDRESS='{"${networkID}":"${exec.address}"}'\n`
-      envVarsContent += `REACT_APP_MINTED_CAPPED_CROWDSALE_INIT_CROWDSALE_ADDRESS='{"${networkID}":"${initCrowdsale.address}"}'\n`
-      envVarsContent += `REACT_APP_MINTED_CAPPED_CROWDSALE_TOKEN_CONSOLE_ADDRESS='{"${networkID}":"${tokenConsole.address}"}'\n`
-      envVarsContent += `REACT_APP_MINTED_CAPPED_CROWDSALE_CROWDSALE_CONSOLE_ADDRESS='{"${networkID}":"${crowdsaleConsole.address}"}'\n`
-      envVarsContent += `REACT_APP_MINTED_CAPPED_CROWDSALE_CROWDSALE_BUY_TOKENS_ADDRESS='{"${networkID}":"${crowdsaleBuy.address}"}'\n`
-	  envVarsContent += `REACT_APP_DUTCH_CROWDSALE_INIT_CROWDSALE_ADDRESS='{"${networkID}":"0x0"}'\n`
-	  envVarsContent += `REACT_APP_DUTCH_CROWDSALE_TOKEN_CONSOLE_ADDRESS='{"${networkID}":"0x0"}'\n`
-	  envVarsContent += `REACT_APP_DUTCH_CROWDSALE_CROWDSALE_CONSOLE_ADDRESS='{"${networkID}":"0x0"}'\n`
-	  envVarsContent += `REACT_APP_DUTCH_CROWDSALE_CROWDSALE_BUY_TOKENS_ADDRESS='{"${networkID}":"0x0"}'\n`
-	  envVarsContent += `REACT_APP_MINTED_CAPPED_CROWDSALE_APP_NAME='MintedCappedCrowdsale'\n`
-	  envVarsContent += `REACT_APP_DUTCH_CROWDSALE_APP_NAME='DutchCrowdsale'\n`
-	  envVarsContent += `REACT_APP_INFURA_TOKEN='kEpzZR9fIyO3a8gTqJcI'\n`
+      const reactAppPrefix = 'REACT_APP_'
+      const mintedCappedPrefix = 'MINTED_CAPPED_CROWDSALE_'
+      const dutchPrefix = 'DUTCH_CROWDSALE_'
+      const addrSuffix = '_ADDRESS'
+      let envVarsContent = ''
+      envVarsContent += `${reactAppPrefix}REGISTRY_STORAGE${addrSuffix}='{"${networkID}":"${storage.address}"}'\n`
+      envVarsContent += `${reactAppPrefix}INIT_REGISTRY${addrSuffix}='{"${networkID}":"${initRegistry.address}"}'\n`
+      envVarsContent += `${reactAppPrefix}APP_CONSOLE${addrSuffix}='{"${networkID}":"${appConsole.address}"}'\n`
+      envVarsContent += `${reactAppPrefix}VERSION_CONSOLE${addrSuffix}='{"${networkID}":"${versionConsole.address}"}'\n`
+      envVarsContent += `${reactAppPrefix}IMPLEMENTATION_CONSOLE${addrSuffix}='{"${networkID}":"${implConsole.address}"}'\n`
+      envVarsContent += `${reactAppPrefix}SCRIPT_EXEC${addrSuffix}='{"${networkID}":"${exec.address}"}'\n`
+      envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}INIT_CROWDSALE${addrSuffix}='{"${networkID}":"${initCrowdsale.address}"}'\n`
+      envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}TOKEN_CONSOLE${addrSuffix}='{"${networkID}":"${tokenConsole.address}"}'\n`
+      envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}CROWDSALE_CONSOLE${addrSuffix}='{"${networkID}":"${crowdsaleConsole.address}"}'\n`
+      envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}CROWDSALE_BUY_TOKENS${addrSuffix}='{"${networkID}":"${crowdsaleBuy.address}"}'\n`
+      envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}TOKEN_TRANSFER${addrSuffix}='{"${networkID}":"${tokenTransfer.address}"}'\n`
+      envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}TOKEN_TRANSFER_FROM${addrSuffix}='{"${networkID}":"${tokenTransferFrom.address}"}'\n`
+      envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}TOKEN_APPROVE${addrSuffix}='{"${networkID}":"${tokenApprove.address}"}'\n`
+  	  envVarsContent += `${reactAppPrefix}${dutchPrefix}INIT_CROWDSALE${addrSuffix}='{"${networkID}":"0x0"}'\n`
+  	  envVarsContent += `${reactAppPrefix}${dutchPrefix}TOKEN_CONSOLE${addrSuffix}='{"${networkID}":"0x0"}'\n`
+  	  envVarsContent += `${reactAppPrefix}${dutchPrefix}CROWDSALE_CONSOLE${addrSuffix}='{"${networkID}":"0x0"}'\n`
+  	  envVarsContent += `${reactAppPrefix}${dutchPrefix}CROWDSALE_BUY_TOKENS${addrSuffix}='{"${networkID}":"0x0"}'\n`
+      envVarsContent += `${reactAppPrefix}${dutchPrefix}TOKEN_TRANSFER${addrSuffix}='{"${networkID}":"0x0"}'\n`
+      envVarsContent += `${reactAppPrefix}${dutchPrefix}TOKEN_TRANSFER_FROM${addrSuffix}='{"${networkID}":"0x0"}'\n`
+      envVarsContent += `${reactAppPrefix}${dutchPrefix}TOKEN_APPROVE${addrSuffix}='{"${networkID}":"0x0"}'\n`
+  	  envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}APP_NAME='MintedCappedCrowdsale'\n`
+  	  envVarsContent += `${reactAppPrefix}${dutchPrefix}APP_NAME='DutchCrowdsale'\n`
+  	  envVarsContent += `${reactAppPrefix}INFURA_TOKEN='kEpzZR9fIyO3a8gTqJcI'\n`
       console.log("envVarsContent:")
       console.log(envVarsContent)
       fs.writeFileSync("./.env", envVarsContent)
