@@ -1,5 +1,5 @@
 // Abstract storage contract
-let AbstractStorage = artifacts.require('./RegistryStorage')
+let AbstractStorage = artifacts.require('./AbstractStorage')
 // MintedCappedCrowdsale
 let InitMintedCapped = artifacts.require('./InitCrowdsale')
 // let MintedCappedBuy = artifacts.require('./CrowdsaleBuyTokens')
@@ -30,11 +30,6 @@ function hexStrEquals(hex, expected) {
   return web3.toAscii(hex).substring(0, expected.length) == expected;
 }
 
-function sendBalanceTo(_from, _to) {
-  let bal = web3.eth.getBalance(_from).toNumber()
-  web3.eth.sendTransaction({ from: _from, to: _to, value: bal, gasPrice: 0 })
-}
-
 contract('#MintedCappedBuyTokens', function (accounts) {
 
   let storage
@@ -50,8 +45,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
   let crowdsaleAdmin = accounts[2]
 
   let teamWallet = accounts[3]
-  let teamWalletInitBalance
-  let execInitBalance
 
   let initCrowdsale
   let crowdsaleBuyMock
@@ -90,12 +83,16 @@ contract('#MintedCappedBuyTokens', function (accounts) {
   let tierModStats = [true, true, true] // All tier durations are modifiable
   let tierWhitelistStats = [true, false, true] // Only Tier 0 and Tier 2 are not whitelisted
 
-  before(async () => {
-    // Transfer funds from teamWallet to exec
-    sendBalanceTo(teamWallet, exec)
-    let bal = web3.eth.getBalance(teamWallet).toNumber()
-    bal.should.be.eq(0)
+  // Event signatures
+  let initHash = web3.sha3('ApplicationInitialized(bytes32,address,address,address)')
+  let finalHash = web3.sha3('ApplicationFinalization(bytes32,address)')
+  let execHash = web3.sha3('ApplicationExecution(bytes32,address)')
+  let payHash = web3.sha3('DeliveredPayment(bytes32,address,uint256)')
+  let exceptHash = web3.sha3('ApplicationException(address,bytes32,bytes)')
 
+  let purchaseHash = web3.sha3('Purchase(bytes32,uint256,address,uint256)')
+
+  before(async () => {
     storage = await AbstractStorage.new().should.be.fulfilled
     testUtils = await TestUtils.new().should.be.fulfilled
     tokenConsoleUtil = await TokenConsoleUtils.new().should.be.fulfilled
@@ -114,14 +111,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
   })
 
   beforeEach(async () => {
-    // Transfer funds from teamWallet to exec
-    sendBalanceTo(teamWallet, exec)
-    let bal = web3.eth.getBalance(teamWallet).toNumber()
-    bal.should.be.eq(0)
-
     startTime = getTime() + 3600
-    teamWalletInitBalance = web3.eth.getBalance(teamWallet).toNumber()
-    execInitBalance = web3.eth.getBalance(exec).toNumber()
 
     initCalldata = await testUtils.init.call(
       teamWallet, startTime, initialTierName, initialTierPrice,
@@ -176,7 +166,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
   describe('pre-test-storage', async() => {
 
     it('should be an uninitialized crowdsale', async () => {
-      let saleInfo = await initCrowdsale.getCrowdsaleInfo(
+      let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
         storage.address, executionID
       ).should.be.fulfilled
       saleInfo.length.should.be.eq(5)
@@ -189,7 +179,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
     })
 
     it('should have a correctly initialized token', async () => {
-      let tokenInfo = await initCrowdsale.getTokenInfo(
+      let tokenInfo = await initCrowdsale.getTokenInfo.call(
         storage.address, executionID
       ).should.be.fulfilled
       tokenInfo.length.should.be.eq(4)
@@ -205,16 +195,17 @@ contract('#MintedCappedBuyTokens', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let invalidContext
 
     beforeEach(async () => {
-      invalidContext = await testUtils.getContext(
+      invalidContext = await testUtils.getContext.call(
         executionID, purchaserList[0], 0
       ).should.be.fulfilled
       invalidContext.should.not.eq('0x')
 
-      let initCrowdsaleCalldata = await crowdsaleConsoleUtil.initializeCrowdsale(
+      let initCrowdsaleCalldata = await crowdsaleConsoleUtil.initializeCrowdsale.call(
         adminContext
       ).should.be.fulfilled
       initCrowdsaleCalldata.should.not.eq('0x')
@@ -234,6 +225,11 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       events.length.should.be.eq(1)
       events[0].event.should.be.eq('ApplicationExecution')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec }
+      ).should.be.fulfilled
+
       events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
         { from: exec }
@@ -243,6 +239,25 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -267,10 +282,10 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should be an initialized crowdsale', async () => {
-        let saleInfo = await initCrowdsale.getCrowdsaleInfo(
+        let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
           storage.address, executionID
         ).should.be.fulfilled
         saleInfo.length.should.be.eq(5)
@@ -283,7 +298,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       })
 
       it('should have a correctly initialized token', async () => {
-        let tokenInfo = await initCrowdsale.getTokenInfo(
+        let tokenInfo = await initCrowdsale.getTokenInfo.call(
           storage.address, executionID
         ).should.be.fulfilled
         tokenInfo.length.should.be.eq(4)
@@ -293,11 +308,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(0)
         tokenInfo[3].toNumber().should.be.eq(0)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = web3.eth.getBalance(teamWallet).toNumber()
-        curTeamBalance.should.be.eq(teamWalletInitBalance)
-      })
     })
   })
 
@@ -305,24 +315,30 @@ contract('#MintedCappedBuyTokens', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = 1000
 
     beforeEach(async () => {
       // Fast-forward to start time
       await crowdsaleBuyMock.setTime(startTime + 1).should.be.fulfilled
-      let storedTime = await crowdsaleBuyMock.set_time().should.be.fulfilled
+      let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
       storedTime.toNumber().should.be.eq(startTime + 1)
 
-      let purchaseContext = await testUtils.getContext(
+      let purchaseContext = await testUtils.getContext.call(
         executionID, purchaserList[0], valueSent
       ).should.be.fulfilled
       purchaseContext.should.not.eq('0x')
 
-      invalidCalldata = await buyTokensUtil.buy(
+      invalidCalldata = await buyTokensUtil.buy.call(
         purchaseContext
       ).should.be.fulfilled
       invalidCalldata.should.not.eq('0x')
+
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec, value: valueSent }
+      ).should.be.fulfilled
 
       let events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
@@ -333,6 +349,25 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -357,10 +392,10 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
-      it('should have an uninitialized crowdsale', async () => {
-        let saleInfo = await initCrowdsale.getCrowdsaleInfo(
+      it('should be an uninitialized crowdsale', async () => {
+        let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
           storage.address, executionID
         ).should.be.fulfilled
         saleInfo.length.should.be.eq(5)
@@ -373,7 +408,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       })
 
       it('should have a correctly initialized token', async () => {
-        let tokenInfo = await initCrowdsale.getTokenInfo(
+        let tokenInfo = await initCrowdsale.getTokenInfo.call(
           storage.address, executionID
         ).should.be.fulfilled
         tokenInfo.length.should.be.eq(4)
@@ -383,11 +418,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(0)
         tokenInfo[3].toNumber().should.be.eq(0)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = web3.eth.getBalance(teamWallet).toNumber()
-        curTeamBalance.should.be.eq(teamWalletInitBalance)
-      })
     })
   })
 
@@ -395,31 +425,32 @@ contract('#MintedCappedBuyTokens', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = 1000
 
     beforeEach(async () => {
       // Fast-forward to start time
       await crowdsaleBuyMock.setTime(startTime + 1).should.be.fulfilled
-      let storedTime = await crowdsaleBuyMock.set_time().should.be.fulfilled
+      let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
       storedTime.toNumber().should.be.eq(startTime + 1)
 
-      let initCrowdsaleCalldata = await crowdsaleConsoleUtil.initializeCrowdsale(
+      let initCrowdsaleCalldata = await crowdsaleConsoleUtil.initializeCrowdsale.call(
         adminContext
       ).should.be.fulfilled
       initCrowdsaleCalldata.should.not.eq('0x')
 
-      let finalizeCalldata = await crowdsaleConsoleUtil.finalizeCrowdsale(
+      let finalizeCalldata = await crowdsaleConsoleUtil.finalizeCrowdsale.call(
         adminContext
       ).should.be.fulfilled
       finalizeCalldata.should.not.eq('0x')
 
-      let purchaseContext = await testUtils.getContext(
+      let purchaseContext = await testUtils.getContext.call(
         executionID, purchaserList[0], valueSent
       ).should.be.fulfilled
       purchaseContext.should.not.eq('0x')
 
-      invalidCalldata = await buyTokensUtil.buy(
+      invalidCalldata = await buyTokensUtil.buy.call(
         purchaseContext
       ).should.be.fulfilled
       invalidCalldata.should.not.eq('0x')
@@ -444,6 +475,11 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       events.length.should.be.eq(1)
       events[0].event.should.be.eq('ApplicationExecution')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec, value: valueSent }
+      ).should.be.fulfilled
+
       events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
         { from: exec, value: valueSent }
@@ -453,6 +489,25 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -477,10 +532,10 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
-      it('should have an initialized and finalized crowdsale', async () => {
-        let saleInfo = await initCrowdsale.getCrowdsaleInfo(
+      it('should be an initialized and finalized crowdsale', async () => {
+        let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
           storage.address, executionID
         ).should.be.fulfilled
         saleInfo.length.should.be.eq(5)
@@ -493,7 +548,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       })
 
       it('should have a correctly initialized token', async () => {
-        let tokenInfo = await initCrowdsale.getTokenInfo(
+        let tokenInfo = await initCrowdsale.getTokenInfo.call(
           storage.address, executionID
         ).should.be.fulfilled
         tokenInfo.length.should.be.eq(4)
@@ -503,11 +558,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(0)
         tokenInfo[3].toNumber().should.be.eq(0)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = web3.eth.getBalance(teamWallet).toNumber()
-        curTeamBalance.should.be.eq(teamWalletInitBalance)
-      })
     })
   })
 
@@ -515,20 +565,26 @@ contract('#MintedCappedBuyTokens', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = 1000
 
     beforeEach(async () => {
 
-      let purchaseContext = await testUtils.getContext(
+      let purchaseContext = await testUtils.getContext.call(
         executionID, purchaserList[0], valueSent
       ).should.be.fulfilled
       purchaseContext.should.not.eq('0x')
 
-      invalidCalldata = await buyTokensUtil.buy(
+      invalidCalldata = await buyTokensUtil.buy.call(
         purchaseContext
       ).should.be.fulfilled
       invalidCalldata.should.not.eq('0x')
+
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec, value: valueSent }
+      ).should.be.fulfilled
 
       let events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
@@ -539,6 +595,25 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -563,10 +638,10 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
-      it('should have an uninitialized crowdsale', async () => {
-        let saleInfo = await initCrowdsale.getCrowdsaleInfo(
+      it('should be an uninitialized crowdsale', async () => {
+        let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
           storage.address, executionID
         ).should.be.fulfilled
         saleInfo.length.should.be.eq(5)
@@ -579,7 +654,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       })
 
       it('should have a correctly initialized token', async () => {
-        let tokenInfo = await initCrowdsale.getTokenInfo(
+        let tokenInfo = await initCrowdsale.getTokenInfo.call(
           storage.address, executionID
         ).should.be.fulfilled
         tokenInfo.length.should.be.eq(4)
@@ -589,11 +664,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(0)
         tokenInfo[3].toNumber().should.be.eq(0)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = web3.eth.getBalance(teamWallet).toNumber()
-        curTeamBalance.should.be.eq(teamWalletInitBalance)
-      })
     })
   })
 
@@ -601,26 +671,27 @@ contract('#MintedCappedBuyTokens', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = 1000
 
     context('current stored tier is beyond tier list range', async () => {
 
       beforeEach(async () => {
-        let advanceCalldata = await buyTokensUtil.advanceToTier(2).should.be.fulfilled
+        let advanceCalldata = await buyTokensUtil.advanceToTier.call(2).should.be.fulfilled
         advanceCalldata.should.not.eq('0x')
 
-        let initCrowdsaleCalldata = await crowdsaleConsoleUtil.initializeCrowdsale(
+        let initCrowdsaleCalldata = await crowdsaleConsoleUtil.initializeCrowdsale.call(
           adminContext
         ).should.be.fulfilled
         initCrowdsaleCalldata.should.not.eq('0x')
 
-        let purchaseContext = await testUtils.getContext(
+        let purchaseContext = await testUtils.getContext.call(
           executionID, purchaserList[0], valueSent
         ).should.be.fulfilled
         purchaseContext.should.not.eq('0x')
 
-        invalidCalldata = await buyTokensUtil.buy(
+        invalidCalldata = await buyTokensUtil.buy.call(
           purchaseContext
         ).should.be.fulfilled
         invalidCalldata.should.not.eq('0x')
@@ -645,6 +716,11 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         events.length.should.be.eq(1)
         events[0].event.should.be.eq('ApplicationExecution')
 
+        invalidReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, invalidCalldata,
+          { from: exec }
+        ).should.be.fulfilled
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, invalidCalldata,
           { from: exec }
@@ -654,6 +730,25 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         events.should.not.eq(null)
         events.length.should.be.eq(1)
         invalidEvent = events[0]
+      })
+
+      describe('returned data', async () => {
+
+        it('should return a tuple with 3 fields', async () => {
+          invalidReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          invalidReturn[0].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          invalidReturn[1].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          invalidReturn[2].toNumber().should.be.eq(0)
+        })
       })
 
       it('should emit an ApplicationException event', async () => {
@@ -678,10 +773,10 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         })
       })
 
-      describe('the resulting crowdsale storage', async () => {
+      describe('storage', async () => {
 
         it('should have an initialized crowdsale', async () => {
-          let saleInfo = await initCrowdsale.getCrowdsaleInfo(
+          let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
             storage.address, executionID
           ).should.be.fulfilled
           saleInfo.length.should.be.eq(5)
@@ -694,7 +789,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         })
 
         it('should have a correctly initialized token', async () => {
-          let tokenInfo = await initCrowdsale.getTokenInfo(
+          let tokenInfo = await initCrowdsale.getTokenInfo.call(
             storage.address, executionID
           ).should.be.fulfilled
           tokenInfo.length.should.be.eq(4)
@@ -706,7 +801,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         })
 
         it('should currently be on tier 1 in storage', async () => {
-          let curTierInfo = await initCrowdsale.getCurrentTierInfo(
+          let curTierInfo = await initCrowdsale.getCurrentTierInfo.call(
             storage.address, executionID
           ).should.be.fulfilled
           curTierInfo.length.should.be.eq(7)
@@ -719,11 +814,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
           curTierInfo[5].should.be.eq(false)
           curTierInfo[6].should.be.eq(false)
         })
-
-        it('should have an unchanged team wallet balance', async () => {
-          let curTeamBalance = web3.eth.getBalance(teamWallet).toNumber()
-          curTeamBalance.should.be.eq(teamWalletInitBalance)
-        })
       })
     })
 
@@ -733,20 +823,20 @@ contract('#MintedCappedBuyTokens', function (accounts) {
 
         // Fast-forward to start time
         await crowdsaleBuyMock.setTime(startTime + initialTierDuration + 1).should.be.fulfilled
-        let storedTime = await crowdsaleBuyMock.set_time().should.be.fulfilled
+        let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
         storedTime.toNumber().should.be.eq(startTime + initialTierDuration + 1)
 
-        let initCrowdsaleCalldata = await crowdsaleConsoleUtil.initializeCrowdsale(
+        let initCrowdsaleCalldata = await crowdsaleConsoleUtil.initializeCrowdsale.call(
           adminContext
         ).should.be.fulfilled
         initCrowdsaleCalldata.should.not.eq('0x')
 
-        let purchaseContext = await testUtils.getContext(
+        let purchaseContext = await testUtils.getContext.call(
           executionID, purchaserList[0], valueSent
         ).should.be.fulfilled
         purchaseContext.should.not.eq('0x')
 
-        invalidCalldata = await buyTokensUtil.buy(
+        invalidCalldata = await buyTokensUtil.buy.call(
           purchaseContext
         ).should.be.fulfilled
         invalidCalldata.should.not.eq('0x')
@@ -761,6 +851,11 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         events.length.should.be.eq(1)
         events[0].event.should.be.eq('ApplicationExecution')
 
+        invalidReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, invalidCalldata,
+          { from: exec }
+        ).should.be.fulfilled
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, invalidCalldata,
           { from: exec }
@@ -770,6 +865,25 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         events.should.not.eq(null)
         events.length.should.be.eq(1)
         invalidEvent = events[0]
+      })
+
+      describe('returned data', async () => {
+
+        it('should return a tuple with 3 fields', async () => {
+          invalidReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          invalidReturn[0].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          invalidReturn[1].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          invalidReturn[2].toNumber().should.be.eq(0)
+        })
       })
 
       it('should emit an ApplicationException event', async () => {
@@ -794,10 +908,10 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         })
       })
 
-      describe('the resulting crowdsale storage', async () => {
+      describe('storage', async () => {
 
         it('should have an initialized crowdsale', async () => {
-          let saleInfo = await initCrowdsale.getCrowdsaleInfo(
+          let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
             storage.address, executionID
           ).should.be.fulfilled
           saleInfo.length.should.be.eq(5)
@@ -810,7 +924,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         })
 
         it('should have a correctly initialized token', async () => {
-          let tokenInfo = await initCrowdsale.getTokenInfo(
+          let tokenInfo = await initCrowdsale.getTokenInfo.call(
             storage.address, executionID
           ).should.be.fulfilled
           tokenInfo.length.should.be.eq(4)
@@ -820,11 +934,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
           tokenInfo[2].toNumber().should.be.eq(0)
           tokenInfo[3].toNumber().should.be.eq(0)
         })
-
-        it('should have an unchanged team wallet balance', async () => {
-          let curTeamBalance = web3.eth.getBalance(teamWallet).toNumber()
-          curTeamBalance.should.be.eq(teamWalletInitBalance)
-        })
       })
     })
   })
@@ -833,29 +942,30 @@ contract('#MintedCappedBuyTokens', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = 1000
 
     beforeEach(async () => {
       // Fast-forward to crowdsale start
       await crowdsaleBuyMock.setTime(startTime + 1).should.be.fulfilled
-      let storedTime = await crowdsaleBuyMock.set_time().should.be.fulfilled
+      let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
       storedTime.toNumber().should.be.eq(startTime + 1)
 
-      let clearTokensCalldata = await buyTokensUtil.setTierTokensRemaining(0).should.be.fulfilled
+      let clearTokensCalldata = await buyTokensUtil.setTierTokensRemaining.call(0).should.be.fulfilled
       clearTokensCalldata.should.not.eq('0x')
 
-      let initCrowdsaleCalldata = await crowdsaleConsoleUtil.initializeCrowdsale(
+      let initCrowdsaleCalldata = await crowdsaleConsoleUtil.initializeCrowdsale.call(
         adminContext
       ).should.be.fulfilled
       initCrowdsaleCalldata.should.not.eq('0x')
 
-      let purchaseContext = await testUtils.getContext(
+      let purchaseContext = await testUtils.getContext.call(
         executionID, purchaserList[0], valueSent
       ).should.be.fulfilled
       purchaseContext.should.not.eq('0x')
 
-      invalidCalldata = await buyTokensUtil.buy(
+      invalidCalldata = await buyTokensUtil.buy.call(
         purchaseContext
       ).should.be.fulfilled
       invalidCalldata.should.not.eq('0x')
@@ -880,6 +990,11 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       events.length.should.be.eq(1)
       events[0].event.should.be.eq('ApplicationExecution')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec }
+      ).should.be.fulfilled
+
       events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
         { from: exec }
@@ -889,6 +1004,25 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -913,10 +1047,10 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should have an initialized crowdsale', async () => {
-        let saleInfo = await initCrowdsale.getCrowdsaleInfo(
+        let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
           storage.address, executionID
         ).should.be.fulfilled
         saleInfo.length.should.be.eq(5)
@@ -929,7 +1063,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       })
 
       it('should have a correctly initialized token', async () => {
-        let tokenInfo = await initCrowdsale.getTokenInfo(
+        let tokenInfo = await initCrowdsale.getTokenInfo.call(
           storage.address, executionID
         ).should.be.fulfilled
         tokenInfo.length.should.be.eq(4)
@@ -941,7 +1075,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       })
 
       it('should have no tokens remaining in the current tier', async () => {
-        let curTierInfo = await initCrowdsale.getCurrentTierInfo(
+        let curTierInfo = await initCrowdsale.getCurrentTierInfo.call(
           storage.address, executionID
         ).should.be.fulfilled
         curTierInfo.length.should.be.eq(7)
@@ -953,11 +1087,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         curTierInfo[4].toNumber().should.be.eq(initialTierPrice)
         curTierInfo[5].should.be.eq(initialTierDurIsModifiable)
         curTierInfo[6].should.be.eq(initialTierIsWhitelisted)
-      })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = web3.eth.getBalance(teamWallet).toNumber()
-        curTeamBalance.should.be.eq(teamWalletInitBalance)
       })
     })
   })
@@ -1013,6 +1142,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
 
       let invalidCalldata
       let invalidEvent
+      let invalidReturn
 
       let valueSent = 1000
 
@@ -1027,6 +1157,11 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         ).should.be.fulfilled
         invalidCalldata.should.not.eq('0x')
 
+        invalidReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, invalidCalldata,
+          { from: exec, value: valueSent }
+        ).should.be.fulfilled
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, invalidCalldata,
           { from: exec, value: valueSent }
@@ -1036,6 +1171,25 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         events.should.not.eq(null)
         events.length.should.be.eq(1)
         invalidEvent = events[0]
+      })
+
+      describe('returned data', async () => {
+
+        it('should return a tuple with 3 fields', async () => {
+          invalidReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          invalidReturn[0].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          invalidReturn[1].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          invalidReturn[2].toNumber().should.be.eq(0)
+        })
       })
 
       it('should emit an ApplicationException event', async () => {
@@ -1060,7 +1214,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         })
       })
 
-      describe('the resulting crowdsale storage', async () => {
+      describe('storage', async () => {
 
         it('should have an initialized crowdsale', async () => {
           let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -1085,11 +1239,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
           hexStrEquals(tokenInfo[1], tokenSymbol).should.be.eq(true)
           tokenInfo[2].toNumber().should.be.eq(0)
           tokenInfo[3].toNumber().should.be.eq(0)
-        })
-
-        it('should have an unchanged team wallet balance', async () => {
-          let curTeamBalance = web3.eth.getBalance(teamWallet).toNumber()
-          curTeamBalance.should.be.eq(teamWalletInitBalance)
         })
       })
     })
@@ -1159,25 +1308,16 @@ contract('#MintedCappedBuyTokens', function (accounts) {
           crowdsaleInfo.length.should.be.eq(5)
           crowdsaleInfo[0].toNumber().should.be.eq(0)
         })
-
-        it('should have the correct value for the team\'s current balance', async () => {
-          let teamBalance = web3.eth.getBalance(teamWallet)
-          teamBalance.toNumber().should.be.eq(teamWalletInitBalance)
-        })
       })
 
       context('sender has contributed before', async () => {
 
         let initialSpend = tierPrices[0] * purchaserMinimum[0]
 
-        let paymentEvent
+        let paymentEvents
+        let paymentReturn
 
         beforeEach(async () => {
-          // Transfer funds from teamWallet to exec
-          sendBalanceTo(teamWallet, exec)
-          let bal = web3.eth.getBalance(teamWallet).toNumber()
-          bal.should.be.eq(0)
-
           let purchaseContext = await testUtils.getContext.call(
             executionID, purchaser[0], initialSpend
           ).should.be.fulfilled
@@ -1188,43 +1328,138 @@ contract('#MintedCappedBuyTokens', function (accounts) {
           ).should.be.fulfilled
           spendCalldata.should.not.eq('0x')
 
-          let events = await storage.exec(
+          paymentReturn = await storage.exec.call(
+            crowdsaleBuyMock.address, executionID, spendCalldata,
+            { from: exec, value: initialSpend }
+          ).should.be.fulfilled
+
+          paymentEvents = await storage.exec(
             crowdsaleBuyMock.address, executionID, spendCalldata,
             { from: exec, value: initialSpend }
           ).then((tx) => {
-            return tx.logs
+            return tx.receipt.logs
           })
-          events.should.not.eq(null)
-          events.length.should.be.eq(2)
-          paymentEvent = events[0]
-          let execEvent = events[1]
-
-          execEvent.event.should.be.eq('ApplicationExecution')
         })
 
-        describe('initial payment results', async () => {
+        describe('returned data', async () => {
 
-          it('should emit a DeliveredPayment event', async () => {
-            paymentEvent.event.should.be.eq('DeliveredPayment')
+          it('should return a tuple with 3 fields', async () => {
+            paymentReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            paymentReturn[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            paymentReturn[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            paymentReturn[2].toNumber().should.be.eq(11)
+          })
+        })
+
+        describe('events', async () => {
+
+          it('should emit a total of 3 events', async () => {
+            paymentEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = paymentEvents[2].topics
+              eventData = paymentEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
           })
 
           describe('the DeliveredPayment event', async () => {
 
-            it('should match the execution ID', async () => {
-              let emittedExecID = paymentEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = paymentEvents[0].topics
+              eventData = paymentEvents[0].data
             })
 
-            it('should match the team wallet destination address', async () => {
-              let destination = paymentEvent.args['destination']
-              destination.should.be.eq(teamWallet)
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
             })
 
-            it('should match the initial spend amount', async () => {
-              let sent = paymentEvent.args['amount']
-              sent.toNumber().should.be.eq(initialSpend)
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(initialSpend)
             })
           })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = paymentEvents[1].topics
+              eventData = paymentEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current tier index, and sender address for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(whitelistTier)
+              web3.toDecimal(eventTopics[3]).should.be.eq(web3.toDecimal(purchaser[0]))
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(purchaserMinimum[0])
+            })
+          })
+        })
+
+        describe('storage', async () => {
 
           it('should have the correct amount of wei raised', async () => {
             let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -1246,11 +1481,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
               storage.address, executionID, purchaser[0]
             ).should.be.fulfilled
             balanceInfo.toNumber().should.be.eq(purchaserMinimum[0])
-          })
-
-          it('should have sent the wei to the team wallet', async () => {
-            let teamBalance = web3.eth.getBalance(teamWallet)
-            teamBalance.toNumber().should.be.eq(initialSpend)
           })
 
           it('should correctly update the purchaser\'s whitelist information', async () => {
@@ -1296,17 +1526,13 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         context('sender is spending over their maximum spend amount', async () => {
 
           let purchaseCalldata
-          let purchaseEvent
+          let purchaseEvents
+          let purchaseReturn
 
           let sendAmount
           let maxSpendAmount
 
           beforeEach(async () => {
-            // Transfer funds from teamWallet to exec
-            sendBalanceTo(teamWallet, exec)
-            let bal = web3.eth.getBalance(teamWallet).toNumber()
-            bal.should.be.eq(0)
-
             sendAmount = (purchaserMaximum[0] - initialSpend) + 1
             maxSpendAmount = purchaserMaximum[0] - initialSpend
             let purchaseContext = await testUtils.getContext.call(
@@ -1321,44 +1547,141 @@ contract('#MintedCappedBuyTokens', function (accounts) {
 
             // Fast-forward to tier 1 start time (tier 1 is whitelisted)
             await crowdsaleBuyMock.setTime(startTime + 1 + initialTierDuration).should.be.fulfilled
-            let storedTime = await crowdsaleBuyMock.set_time().should.be.fulfilled
+            let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
             storedTime.toNumber().should.be.eq(startTime + 1 + initialTierDuration)
 
-            let events = await storage.exec(
+            purchaseReturn = await storage.exec.call(
+              crowdsaleBuyMock.address, executionID, purchaseCalldata,
+              { from: exec, value: sendAmount }
+            ).should.be.fulfilled
+
+            purchaseEvents = await storage.exec(
               crowdsaleBuyMock.address, executionID, purchaseCalldata,
               { from: exec, value: sendAmount }
             ).then((tx) => {
-              return tx.logs
-            })
-            events.should.not.eq(null)
-            events.length.should.be.eq(2)
-            purchaseEvent = events[0]
-            events[1].event.should.be.eq('ApplicationExecution')
-          })
-
-          it('should emit a DeliveredPayment event', async () => {
-            purchaseEvent.event.should.be.eq('DeliveredPayment')
-          })
-
-          describe('the DeliveredPayment event', async () => {
-
-            it('should match the execution ID', async () => {
-              let emittedExecID = purchaseEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
-            })
-
-            it('should match the team wallet destination address', async () => {
-              let destination = purchaseEvent.args['destination']
-              destination.should.be.eq(teamWallet)
-            })
-
-            it('should match the maximum spend amount', async () => {
-              let sent = purchaseEvent.args['amount']
-              sent.toNumber().should.be.eq(maxSpendAmount)
+              return tx.receipt.logs
             })
           })
 
-          describe('payment results', async () => {
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              purchaseReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              purchaseReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              purchaseReturn[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              purchaseReturn[2].toNumber().should.be.eq(7)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should emit a total of 3 events', async () => {
+              purchaseEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[2].topics
+                eventData = purchaseEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+
+            describe('the DeliveredPayment event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[0].topics
+                eventData = purchaseEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(maxSpendAmount)
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[1].topics
+                eventData = purchaseEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current tier index, and sender address for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(whitelistTier)
+                web3.toDecimal(eventTopics[3]).should.be.eq(web3.toDecimal(purchaser[0]))
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(maxSpendAmount / tierPrices[0])
+              })
+            })
+          })
+
+          describe('storage', async () => {
 
             it('should have the correct amount of wei raised', async () => {
               let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -1382,11 +1705,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
               balanceInfo.toNumber().should.be.eq(
                 purchaserMinimum[0] + (maxSpendAmount / tierPrices[0])
               )
-            })
-
-            it('should have sent the wei to the team wallet', async () => {
-              let teamBalance = web3.eth.getBalance(teamWallet)
-              teamBalance.toNumber().should.be.eq(maxSpendAmount)
             })
 
             it('should correctly update the purchaser\'s whitelist information', async () => {
@@ -1465,16 +1783,12 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         context('sender is not spending over their maximum spend amount', async () => {
 
           let purchaseCalldata
-          let purchaseEvent
+          let purchaseEvents
+          let purchaseReturn
 
           let sendAmount = tierPrices[0]
 
           beforeEach(async () => {
-            // Transfer funds from teamWallet to exec
-            sendBalanceTo(teamWallet, exec)
-            let bal = web3.eth.getBalance(teamWallet).toNumber()
-            bal.should.be.eq(0)
-
             let purchaseContext = await testUtils.getContext.call(
               executionID, purchaser[0], sendAmount
             ).should.be.fulfilled
@@ -1487,44 +1801,141 @@ contract('#MintedCappedBuyTokens', function (accounts) {
 
             // Fast-forward to tier 1 start time (tier 1 is whitelisted)
             await crowdsaleBuyMock.setTime(startTime + 1 + initialTierDuration).should.be.fulfilled
-            let storedTime = await crowdsaleBuyMock.set_time().should.be.fulfilled
+            let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
             storedTime.toNumber().should.be.eq(startTime + 1 + initialTierDuration)
 
-            let events = await storage.exec(
+            purchaseReturn = await storage.exec.call(
+              crowdsaleBuyMock.address, executionID, purchaseCalldata,
+              { from: exec, value: sendAmount }
+            ).should.be.fulfilled
+
+            purchaseEvents = await storage.exec(
               crowdsaleBuyMock.address, executionID, purchaseCalldata,
               { from: exec, value: sendAmount }
             ).then((tx) => {
-              return tx.logs
-            })
-            events.should.not.eq(null)
-            events.length.should.be.eq(2)
-            purchaseEvent = events[0]
-            events[1].event.should.be.eq('ApplicationExecution')
-          })
-
-          it('should emit a DeliveredPayment event', async () => {
-            purchaseEvent.event.should.be.eq('DeliveredPayment')
-          })
-
-          describe('the DeliveredPayment event', async () => {
-
-            it('should match the execution ID', async () => {
-              let emittedExecID = purchaseEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
-            })
-
-            it('should match the team wallet destination address', async () => {
-              let destination = purchaseEvent.args['destination']
-              destination.should.be.eq(teamWallet)
-            })
-
-            it('should match the amount sent', async () => {
-              let sent = purchaseEvent.args['amount']
-              sent.toNumber().should.be.eq(sendAmount)
+              return tx.receipt.logs
             })
           })
 
-          describe('payment results', async () => {
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              purchaseReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              purchaseReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              purchaseReturn[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              purchaseReturn[2].toNumber().should.be.eq(7)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should emit a total of 3 events', async () => {
+              purchaseEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[2].topics
+                eventData = purchaseEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+
+            describe('the DeliveredPayment event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[0].topics
+                eventData = purchaseEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(sendAmount)
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[1].topics
+                eventData = purchaseEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current tier index, and sender address for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(whitelistTier)
+                web3.toDecimal(eventTopics[3]).should.be.eq(web3.toDecimal(purchaser[0]))
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(sendAmount / tierPrices[0])
+              })
+            })
+          })
+
+          describe('storage', async () => {
 
             it('should have the correct amount of wei raised', async () => {
               let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -1548,11 +1959,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
               balanceInfo.toNumber().should.be.eq(
                 purchaserMinimum[0] + (sendAmount / tierPrices[0])
               )
-            })
-
-            it('should have sent the wei to the team wallet', async () => {
-              let teamBalance = web3.eth.getBalance(teamWallet)
-              teamBalance.toNumber().should.be.eq(sendAmount)
             })
 
             it('should correctly update the purchaser\'s whitelist information', async () => {
@@ -1605,16 +2011,12 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         context('sender is spending exactly their maximum spend amount', async () => {
 
           let purchaseCalldata
-          let purchaseEvent
+          let purchaseEvents
+          let purchaseReturn
 
           let sendAmount = purchaserMaximum[0] - initialSpend
 
           beforeEach(async () => {
-            // Transfer funds from teamWallet to exec
-            sendBalanceTo(teamWallet, exec)
-            let bal = web3.eth.getBalance(teamWallet).toNumber()
-            bal.should.be.eq(0)
-
             let purchaseContext = await testUtils.getContext.call(
               executionID, purchaser[0], sendAmount
             ).should.be.fulfilled
@@ -1630,41 +2032,138 @@ contract('#MintedCappedBuyTokens', function (accounts) {
             let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
             storedTime.toNumber().should.be.eq(startTime + 1 + initialTierDuration)
 
-            let events = await storage.exec(
+            purchaseReturn = await storage.exec.call(
+              crowdsaleBuyMock.address, executionID, purchaseCalldata,
+              { from: exec, value: sendAmount }
+            ).should.be.fulfilled
+
+            purchaseEvents = await storage.exec(
               crowdsaleBuyMock.address, executionID, purchaseCalldata,
               { from: exec, value: sendAmount }
             ).then((tx) => {
-              return tx.logs
-            })
-            events.should.not.eq(null)
-            events.length.should.be.eq(2)
-            purchaseEvent = events[0]
-            events[1].event.should.be.eq('ApplicationExecution')
-          })
-
-          it('should emit a DeliveredPayment event', async () => {
-            purchaseEvent.event.should.be.eq('DeliveredPayment')
-          })
-
-          describe('the DeliveredPayment event', async () => {
-
-            it('should match the execution ID', async () => {
-              let emittedExecID = purchaseEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
-            })
-
-            it('should match the team wallet destination address', async () => {
-              let destination = purchaseEvent.args['destination']
-              destination.should.be.eq(teamWallet)
-            })
-
-            it('should match the amount sent', async () => {
-              let sent = purchaseEvent.args['amount']
-              sent.toNumber().should.be.eq(sendAmount)
+              return tx.receipt.logs
             })
           })
 
-          describe('payment results', async () => {
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              purchaseReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              purchaseReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              purchaseReturn[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              purchaseReturn[2].toNumber().should.be.eq(7)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should emit a total of 3 events', async () => {
+              purchaseEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[2].topics
+                eventData = purchaseEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+
+            describe('the DeliveredPayment event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[0].topics
+                eventData = purchaseEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(sendAmount)
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[1].topics
+                eventData = purchaseEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current tier index, and sender address for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(whitelistTier)
+                web3.toDecimal(eventTopics[3]).should.be.eq(web3.toDecimal(purchaser[0]))
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(sendAmount / tierPrices[0])
+              })
+            })
+          })
+
+          describe('storage', async () => {
 
             it('should have the correct amount of wei raised', async () => {
               let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -1686,11 +2185,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
                 storage.address, executionID, purchaser[0]
               ).should.be.fulfilled
               balanceInfo.toNumber().should.be.eq(purchaserMaximum[0] / tierPrices[0])
-            })
-
-            it('should have sent the wei to the team wallet', async () => {
-              let teamBalance = web3.eth.getBalance(teamWallet)
-              teamBalance.toNumber().should.be.eq(sendAmount)
             })
 
             it('should correctly update the purchaser\'s whitelist information', async () => {
@@ -1765,31 +2259,30 @@ contract('#MintedCappedBuyTokens', function (accounts) {
 
       context('sender has not contributed before', async () => {
 
-        beforeEach(async () => {
-          // Transfer funds from teamWallet to exec
-          sendBalanceTo(teamWallet, exec)
-          let bal = web3.eth.getBalance(teamWallet).toNumber()
-          bal.should.be.eq(0)
-        })
-
         context('sender is not buying above minimum contribution', async () => {
 
           let invalidCalldata
           let invalidEvent
+          let invalidReturn
 
           // Sending 1 under the amount required to buy the minimum amount
           let invalidAmount = (purchaserMinimum[0] * tierPrices[0]) - 1
 
           beforeEach(async () => {
-            let invalidContext = await testUtils.getContext(
+            let invalidContext = await testUtils.getContext.call(
               executionID, purchaser[0], invalidAmount
             ).should.be.fulfilled
             invalidContext.should.not.eq('0x')
 
-            invalidCalldata = await buyTokensUtil.buy(
+            invalidCalldata = await buyTokensUtil.buy.call(
               invalidContext
             ).should.be.fulfilled
             invalidCalldata.should.not.eq('0x')
+
+            invalidReturn = await storage.exec.call(
+              crowdsaleBuyMock.address, executionID, invalidCalldata,
+              { from: exec, value: invalidAmount }
+            ).should.be.fulfilled
 
             let events = await storage.exec(
               crowdsaleBuyMock.address, executionID, invalidCalldata,
@@ -1800,6 +2293,25 @@ contract('#MintedCappedBuyTokens', function (accounts) {
             events.should.not.eq(null)
             events.length.should.be.eq(1)
             invalidEvent = events[0]
+          })
+
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              invalidReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              invalidReturn[0].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              invalidReturn[1].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              invalidReturn[2].toNumber().should.be.eq(0)
+            })
           })
 
           it('should emit an ApplicationException event', async () => {
@@ -1824,10 +2336,10 @@ contract('#MintedCappedBuyTokens', function (accounts) {
             })
           })
 
-          describe('the resulting crowdsale storage', async () => {
+          describe('storage', async () => {
 
             it('should have an initialized crowdsale', async () => {
-              let saleInfo = await initCrowdsale.getCrowdsaleInfo(
+              let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
                 storage.address, executionID
               ).should.be.fulfilled
               saleInfo.length.should.be.eq(5)
@@ -1840,7 +2352,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
             })
 
             it('should have a correctly initialized token', async () => {
-              let tokenInfo = await initCrowdsale.getTokenInfo(
+              let tokenInfo = await initCrowdsale.getTokenInfo.call(
                 storage.address, executionID
               ).should.be.fulfilled
               tokenInfo.length.should.be.eq(4)
@@ -1850,24 +2362,740 @@ contract('#MintedCappedBuyTokens', function (accounts) {
               tokenInfo[2].toNumber().should.be.eq(0)
               tokenInfo[3].toNumber().should.be.eq(0)
             })
-
-            it('should have an unchanged team wallet balance', async () => {
-              let curTeamBalance = web3.eth.getBalance(teamWallet).toNumber()
-              curTeamBalance.should.be.eq(teamWalletInitBalance)
-            })
           })
         })
 
         context('sender is buying above minimum contribution', async () => {
 
+          let purchaseCalldata
+          let purchaseEvents
+          let purchaseReturn
+
+          let sendAmount = purchaserMinimum[0] * tierPrices[0]
+
+          beforeEach(async () => {
+            let purchaseContext = await testUtils.getContext.call(
+              executionID, purchaser[0], sendAmount
+            ).should.be.fulfilled
+            purchaseContext.should.not.eq('0x')
+
+            purchaseCalldata = await buyTokensUtil.buy.call(
+              purchaseContext
+            ).should.be.fulfilled
+            purchaseCalldata.should.not.eq('0x')
+
+            // Fast-forward to tier 1 start time (tier 1 is whitelisted)
+            await crowdsaleBuyMock.setTime(startTime + 1 + initialTierDuration).should.be.fulfilled
+            let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
+            storedTime.toNumber().should.be.eq(startTime + 1 + initialTierDuration)
+
+            purchaseReturn = await storage.exec.call(
+              crowdsaleBuyMock.address, executionID, purchaseCalldata,
+              { from: exec, value: sendAmount }
+            ).should.be.fulfilled
+
+            purchaseEvents = await storage.exec(
+              crowdsaleBuyMock.address, executionID, purchaseCalldata,
+              { from: exec, value: sendAmount }
+            ).then((tx) => {
+              return tx.receipt.logs
+            })
+          })
+
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              purchaseReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              purchaseReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              purchaseReturn[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              purchaseReturn[2].toNumber().should.be.eq(11)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should emit a total of 3 events', async () => {
+              purchaseEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[2].topics
+                eventData = purchaseEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+
+            describe('the DeliveredPayment event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[0].topics
+                eventData = purchaseEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(sendAmount)
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[1].topics
+                eventData = purchaseEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current tier index, and sender address for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(whitelistTier)
+                web3.toDecimal(eventTopics[3]).should.be.eq(web3.toDecimal(purchaser[0]))
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(sendAmount / tierPrices[0])
+              })
+            })
+          })
+
+          describe('storage', async () => {
+
+            it('should have the correct amount of wei raised', async () => {
+              let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              crowdsaleInfo.length.should.be.eq(5)
+              crowdsaleInfo[0].toNumber().should.be.eq(sendAmount)
+            })
+
+            it('should have 1 unique buyer', async () => {
+              let uniqueInfo = await initCrowdsale.getCrowdsaleUniqueBuyers.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              uniqueInfo.toNumber().should.be.eq(1)
+            })
+
+            it('should correctly store the purchaser\'s balance', async () => {
+              let balanceInfo = await initCrowdsale.balanceOf.call(
+                storage.address, executionID, purchaser[0]
+              ).should.be.fulfilled
+              balanceInfo.toNumber().should.be.eq(
+                sendAmount / tierPrices[0]
+              )
+            })
+
+            it('should correctly update the purchaser\'s whitelist information', async () => {
+              let whitelistInfo = await initCrowdsale.getWhitelistStatus.call(
+                storage.address, executionID, whitelistTier, purchaser[0]
+              ).should.be.fulfilled
+              whitelistInfo.length.should.be.eq(2)
+              whitelistInfo[0].toNumber().should.be.eq(0)
+              whitelistInfo[1].toNumber().should.be.eq(purchaserMaximum[0] - sendAmount)
+            })
+
+            it('should correctly update the token total supply', async () => {
+              let supplyInfo = await initCrowdsale.totalSupply.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              supplyInfo.toNumber().should.be.eq(
+                sendAmount / tierPrices[0]
+              )
+            })
+
+            it('should correctly update the current tier', async () => {
+              let curTierInfo = await initCrowdsale.getCurrentTierInfo.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              curTierInfo.length.should.be.eq(7)
+              hexStrEquals(curTierInfo[0], tierNames[0]).should.be.eq(true)
+              curTierInfo[1].toNumber().should.be.eq(1)
+              curTierInfo[2].toNumber().should.be.eq(
+                startTime + initialTierDuration + tierDurations[0]
+              )
+              curTierInfo[3].toNumber().should.be.eq(
+                tierCaps[0] - (sendAmount / tierPrices[0])
+              )
+              curTierInfo[4].toNumber().should.be.eq(tierPrices[0])
+              curTierInfo[5].should.be.eq(tierModStats[0])
+              curTierInfo[6].should.be.eq(tierWhitelistStats[0])
+            })
+
+            it('should correctly update the total tokens sold', async () => {
+              let soldInfo = await initCrowdsale.getTokensSold.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              soldInfo.toNumber().should.be.eq(
+                sendAmount / tierPrices[0]
+              )
+            })
+          })
         })
 
         context('sender is spending over their maximum spend amount', async () => {
 
+          let purchaseCalldata
+          let purchaseEvents
+          let purchaseReturn
+
+          let sendAmount
+          let maxSpendAmount
+
+          beforeEach(async () => {
+            sendAmount = purchaserMaximum[0] + 1
+            maxSpendAmount = purchaserMaximum[0]
+            let purchaseContext = await testUtils.getContext.call(
+              executionID, purchaser[0], sendAmount
+            ).should.be.fulfilled
+            purchaseContext.should.not.eq('0x')
+
+            purchaseCalldata = await buyTokensUtil.buy.call(
+              purchaseContext
+            ).should.be.fulfilled
+            purchaseCalldata.should.not.eq('0x')
+
+            // Fast-forward to tier 1 start time (tier 1 is whitelisted)
+            await crowdsaleBuyMock.setTime(startTime + 1 + initialTierDuration).should.be.fulfilled
+            let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
+            storedTime.toNumber().should.be.eq(startTime + 1 + initialTierDuration)
+
+            purchaseReturn = await storage.exec.call(
+              crowdsaleBuyMock.address, executionID, purchaseCalldata,
+              { from: exec, value: sendAmount }
+            ).should.be.fulfilled
+
+            purchaseEvents = await storage.exec(
+              crowdsaleBuyMock.address, executionID, purchaseCalldata,
+              { from: exec, value: sendAmount }
+            ).then((tx) => {
+              return tx.receipt.logs
+            })
+          })
+
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              purchaseReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              purchaseReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              purchaseReturn[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              purchaseReturn[2].toNumber().should.be.eq(11)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should emit a total of 3 events', async () => {
+              purchaseEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[2].topics
+                eventData = purchaseEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+
+            describe('the DeliveredPayment event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[0].topics
+                eventData = purchaseEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(maxSpendAmount)
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[1].topics
+                eventData = purchaseEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current tier index, and sender address for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(whitelistTier)
+                web3.toDecimal(eventTopics[3]).should.be.eq(web3.toDecimal(purchaser[0]))
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(maxSpendAmount / tierPrices[0])
+              })
+            })
+          })
+
+          describe('storage', async () => {
+
+            it('should have the correct amount of wei raised', async () => {
+              let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              crowdsaleInfo.length.should.be.eq(5)
+              crowdsaleInfo[0].toNumber().should.be.eq(maxSpendAmount)
+            })
+
+            it('should have 1 unique buyer', async () => {
+              let uniqueInfo = await initCrowdsale.getCrowdsaleUniqueBuyers.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              uniqueInfo.toNumber().should.be.eq(1)
+            })
+
+            it('should correctly store the purchaser\'s balance', async () => {
+              let balanceInfo = await initCrowdsale.balanceOf.call(
+                storage.address, executionID, purchaser[0]
+              ).should.be.fulfilled
+              balanceInfo.toNumber().should.be.eq(
+                maxSpendAmount / tierPrices[0]
+              )
+            })
+
+            it('should correctly update the purchaser\'s whitelist information', async () => {
+              let whitelistInfo = await initCrowdsale.getWhitelistStatus.call(
+                storage.address, executionID, whitelistTier, purchaser[0]
+              ).should.be.fulfilled
+              whitelistInfo.length.should.be.eq(2)
+              whitelistInfo[0].toNumber().should.be.eq(0)
+              whitelistInfo[1].toNumber().should.be.eq(0)
+            })
+
+            it('should correctly update the token total supply', async () => {
+              let supplyInfo = await initCrowdsale.totalSupply.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              supplyInfo.toNumber().should.be.eq(
+                maxSpendAmount / tierPrices[0]
+              )
+            })
+
+            it('should correctly update the current tier', async () => {
+              let curTierInfo = await initCrowdsale.getCurrentTierInfo.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              curTierInfo.length.should.be.eq(7)
+              hexStrEquals(curTierInfo[0], tierNames[0]).should.be.eq(true)
+              curTierInfo[1].toNumber().should.be.eq(1)
+              curTierInfo[2].toNumber().should.be.eq(
+                startTime + initialTierDuration + tierDurations[0]
+              )
+              curTierInfo[3].toNumber().should.be.eq(
+                tierCaps[0] - (maxSpendAmount / tierPrices[0])
+              )
+              curTierInfo[4].toNumber().should.be.eq(tierPrices[0])
+              curTierInfo[5].should.be.eq(tierModStats[0])
+              curTierInfo[6].should.be.eq(tierWhitelistStats[0])
+            })
+
+            it('should correctly update the total tokens sold', async () => {
+              let soldInfo = await initCrowdsale.getTokensSold.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              soldInfo.toNumber().should.be.eq(
+                maxSpendAmount / tierPrices[0]
+              )
+            })
+          })
+
+          it('should disallow purchases from the same sender', async () => {
+            let invalidAmount = 1
+            let invalidContext = await testUtils.getContext.call(
+              executionID, purchaser[0], invalidAmount
+            ).should.be.fulfilled
+            invalidContext.should.not.eq('0x')
+
+            let invalidCalldata = await buyTokensUtil.buy.call(
+              invalidContext
+            ).should.be.fulfilled
+            invalidCalldata.should.not.eq('0x')
+
+            let events = await storage.exec(
+              crowdsaleBuyMock.address, executionID, invalidCalldata,
+              { from: exec, value: invalidAmount }
+            ).then((tx) => {
+              return tx.logs
+            })
+            events.should.not.eq(null)
+            events.length.should.be.eq(1)
+            let invalidEvent = events[0]
+
+            invalidEvent.event.should.be.eq('ApplicationException')
+            hexStrEquals(invalidEvent.args['message'], 'InvalidSpendAmount').should.be.eq(true)
+          })
         })
 
         context('sender is not spending over their maximum spend amount', async () => {
 
+          let purchaseCalldata
+          let purchaseEvents
+          let purchaseReturn
+
+          let sendAmount = purchaserMaximum[0]
+
+          beforeEach(async () => {
+            let purchaseContext = await testUtils.getContext.call(
+              executionID, purchaser[0], sendAmount
+            ).should.be.fulfilled
+            purchaseContext.should.not.eq('0x')
+
+            purchaseCalldata = await buyTokensUtil.buy.call(
+              purchaseContext
+            ).should.be.fulfilled
+            purchaseCalldata.should.not.eq('0x')
+
+            // Fast-forward to tier 1 start time (tier 1 is whitelisted)
+            await crowdsaleBuyMock.setTime(startTime + 1 + initialTierDuration).should.be.fulfilled
+            let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
+            storedTime.toNumber().should.be.eq(startTime + 1 + initialTierDuration)
+
+            purchaseReturn = await storage.exec.call(
+              crowdsaleBuyMock.address, executionID, purchaseCalldata,
+              { from: exec, value: sendAmount }
+            ).should.be.fulfilled
+
+            purchaseEvents = await storage.exec(
+              crowdsaleBuyMock.address, executionID, purchaseCalldata,
+              { from: exec, value: sendAmount }
+            ).then((tx) => {
+              return tx.receipt.logs
+            })
+          })
+
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              purchaseReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              purchaseReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              purchaseReturn[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              purchaseReturn[2].toNumber().should.be.eq(11)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should emit a total of 3 events', async () => {
+              purchaseEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[2].topics
+                eventData = purchaseEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+
+            describe('the DeliveredPayment event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[0].topics
+                eventData = purchaseEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(sendAmount)
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[1].topics
+                eventData = purchaseEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current tier index, and sender address for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(whitelistTier)
+                web3.toDecimal(eventTopics[3]).should.be.eq(web3.toDecimal(purchaser[0]))
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(sendAmount / tierPrices[0])
+              })
+            })
+          })
+
+          describe('storage', async () => {
+
+            it('should have the correct amount of wei raised', async () => {
+              let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              crowdsaleInfo.length.should.be.eq(5)
+              crowdsaleInfo[0].toNumber().should.be.eq(purchaserMaximum[0])
+            })
+
+            it('should have 1 unique buyer', async () => {
+              let uniqueInfo = await initCrowdsale.getCrowdsaleUniqueBuyers.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              uniqueInfo.toNumber().should.be.eq(1)
+            })
+
+            it('should correctly store the purchaser\'s balance', async () => {
+              let balanceInfo = await initCrowdsale.balanceOf.call(
+                storage.address, executionID, purchaser[0]
+              ).should.be.fulfilled
+              balanceInfo.toNumber().should.be.eq(purchaserMaximum[0] / tierPrices[0])
+            })
+
+            it('should correctly update the purchaser\'s whitelist information', async () => {
+              let whitelistInfo = await initCrowdsale.getWhitelistStatus.call(
+                storage.address, executionID, whitelistTier, purchaser[0]
+              ).should.be.fulfilled
+              whitelistInfo.length.should.be.eq(2)
+              whitelistInfo[0].toNumber().should.be.eq(0)
+              whitelistInfo[1].toNumber().should.be.eq(0)
+            })
+
+            it('should correctly update the token total supply', async () => {
+              let supplyInfo = await initCrowdsale.totalSupply.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              supplyInfo.toNumber().should.be.eq(purchaserMaximum[0] / tierPrices[0])
+            })
+
+            it('should correctly update the current tier', async () => {
+              let curTierInfo = await initCrowdsale.getCurrentTierInfo.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              curTierInfo.length.should.be.eq(7)
+              hexStrEquals(curTierInfo[0], tierNames[0]).should.be.eq(true)
+              curTierInfo[1].toNumber().should.be.eq(1)
+              curTierInfo[2].toNumber().should.be.eq(
+                startTime + initialTierDuration + tierDurations[0]
+              )
+              curTierInfo[3].toNumber().should.be.eq(
+                tierCaps[0] - (purchaserMaximum[0] / tierPrices[0])
+              )
+              curTierInfo[4].toNumber().should.be.eq(tierPrices[0])
+              curTierInfo[5].should.be.eq(tierModStats[0])
+              curTierInfo[6].should.be.eq(tierWhitelistStats[0])
+            })
+
+            it('should correctly update the total tokens sold', async () => {
+              let soldInfo = await initCrowdsale.getTokensSold.call(
+                storage.address, executionID
+              ).should.be.fulfilled
+              soldInfo.toNumber().should.be.eq(purchaserMaximum[0] / tierPrices[0])
+            })
+          })
+
+          it('should disallow purchases from the same sender', async () => {
+            let invalidAmount = 1
+            let invalidContext = await testUtils.getContext.call(
+              executionID, purchaser[0], invalidAmount
+            ).should.be.fulfilled
+            invalidContext.should.not.eq('0x')
+
+            let invalidCalldata = await buyTokensUtil.buy.call(
+              invalidContext
+            ).should.be.fulfilled
+            invalidCalldata.should.not.eq('0x')
+
+            let events = await storage.exec(
+              crowdsaleBuyMock.address, executionID, invalidCalldata,
+              { from: exec, value: invalidAmount }
+            ).then((tx) => {
+              return tx.logs
+            })
+            events.should.not.eq(null)
+            events.length.should.be.eq(1)
+            let invalidEvent = events[0]
+
+            invalidEvent.event.should.be.eq('ApplicationException')
+            hexStrEquals(invalidEvent.args['message'], 'InvalidSpendAmount').should.be.eq(true)
+          })
         })
       })
     })
@@ -1926,15 +3154,16 @@ contract('#MintedCappedBuyTokens', function (accounts) {
       let secondSpend = tierPrices[1] - 1 // Sending less than the price of 1 token
       let thirdSpend = tierPrices[1] * 1000 // Sending enough for 1000 tokens
 
-      let firstPaymentEvent
-      let thirdPaymentEvent
+      let firstPaymentEvents
+      let firstPaymentReturn
+
+      let secondPaymentEvent
+      let secondPaymentReturn
+
+      let thirdPaymentEvents
+      let thirdPaymentReturn
 
       beforeEach(async () => {
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = web3.eth.getBalance(teamWallet).toNumber()
-        bal.should.be.eq(0)
-
         let purchaseContext = await testUtils.getContext.call(
           executionID, purchaserList[0], initialSpend
         ).should.be.fulfilled
@@ -1945,17 +3174,17 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         ).should.be.fulfilled
         spendCalldata.should.not.eq('0x')
 
-        let events = await storage.exec(
+        firstPaymentReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, spendCalldata,
+          { from: exec, value: initialSpend }
+        ).should.be.fulfilled
+
+        firstPaymentEvents = await storage.exec(
           crowdsaleBuyMock.address, executionID, spendCalldata,
           { from: exec, value: initialSpend }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        firstPaymentEvent = events[0]
-        let execEvent = events[1]
-        execEvent.event.should.be.eq('ApplicationExecution')
 
         purchaseContext = await testUtils.getContext.call(
           executionID, purchaserList[0], secondSpend
@@ -1967,6 +3196,11 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         ).should.be.fulfilled
         spendCalldata.should.not.eq('0x')
 
+        secondPaymentReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, spendCalldata,
+          { from: exec, value: secondSpend }
+        ).should.be.fulfilled
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, spendCalldata,
           { from: exec, value: secondSpend }
@@ -1975,8 +3209,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         })
         events.should.not.eq(null)
         events.length.should.be.eq(1)
-        execEvent = events[0]
-        execEvent.event.should.be.eq('ApplicationException')
+        secondPaymentEvent = events[0]
 
         purchaseContext = await testUtils.getContext.call(
           executionID, purchaserList[1], thirdSpend
@@ -1988,49 +3221,306 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         ).should.be.fulfilled
         spendCalldata.should.not.eq('0x')
 
-        events = await storage.exec(
+        thirdPaymentReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, spendCalldata,
+          { from: exec, value: thirdSpend }
+        ).should.be.fulfilled
+
+        thirdPaymentEvents = await storage.exec(
           crowdsaleBuyMock.address, executionID, spendCalldata,
           { from: exec, value: thirdSpend }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        thirdPaymentEvent = events[0]
-        execEvent = events[1]
-        execEvent.event.should.be.eq('ApplicationExecution')
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 2 DeliveredPayment events', async () => {
-          firstPaymentEvent.event.should.be.eq('DeliveredPayment')
-          thirdPaymentEvent.event.should.be.eq('DeliveredPayment')
-        })
+        describe('first payment', async () => {
 
-        describe('the DeliveredPayment events', async () => {
-
-          it('should match the execution ID', async () => {
-            let emittedExecID = firstPaymentEvent.args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = thirdPaymentEvent.args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          it('should return a tuple with 3 fields', async () => {
+            firstPaymentReturn.length.should.be.eq(3)
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = firstPaymentEvent.args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = thirdPaymentEvent.args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return the correct number of events emitted', async () => {
+            firstPaymentReturn[0].toNumber().should.be.eq(1)
           })
 
-          it('should match the initial spend amount', async () => {
-            let sent = firstPaymentEvent.args['amount']
-            sent.toNumber().should.be.eq(initialSpend)
-            sent = thirdPaymentEvent.args['amount']
-            sent.toNumber().should.be.eq(thirdSpend)
+          it('should return the correct number of addresses paid', async () => {
+            firstPaymentReturn[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            firstPaymentReturn[2].toNumber().should.be.eq(9)
           })
         })
+
+        describe('second payment', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            secondPaymentReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            secondPaymentReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            secondPaymentReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            secondPaymentReturn[2].toNumber().should.be.eq(0)
+          })
+        })
+
+        describe('third payment', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            firstPaymentReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            firstPaymentReturn[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            firstPaymentReturn[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            firstPaymentReturn[2].toNumber().should.be.eq(9)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        describe('first payment', async () => {
+
+          it('should emit a total of 3 events', async () => {
+            firstPaymentEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = firstPaymentEvents[2].topics
+              eventData = firstPaymentEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = firstPaymentEvents[0].topics
+              eventData = firstPaymentEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(initialSpend)
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = firstPaymentEvents[1].topics
+              eventData = firstPaymentEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current tier index, and sender address for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(defaultTier)
+              web3.toDecimal(eventTopics[3]).should.be.eq(web3.toDecimal(purchaserList[0]))
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(initialSpend / tierPrices[1])
+            })
+          })
+        })
+
+        describe('second payment', async () => {
+
+          it('should emit an ApplicationException event', async () => {
+            secondPaymentEvent.event.should.be.eq('ApplicationException')
+          })
+
+          describe('the ApplicationException event', async () => {
+
+            it('should match the used execution id', async () => {
+              let emittedExecID = secondPaymentEvent.args['execution_id']
+              emittedExecID.should.be.eq(executionID)
+            })
+
+            it('should match the BuyTokensMock address', async () => {
+              let emittedAppAddr = secondPaymentEvent.args['application_address']
+              emittedAppAddr.should.be.eq(crowdsaleBuyMock.address)
+            })
+
+            it('should contain the error message \'InvalidPurchaseAmount\'', async () => {
+              let emittedMessage = secondPaymentEvent.args['message']
+              hexStrEquals(emittedMessage, 'InvalidPurchaseAmount').should.be.eq(true)
+            })
+          })
+        })
+
+        describe('third payment', async () => {
+
+          it('should emit a total of 3 events', async () => {
+            thirdPaymentEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = thirdPaymentEvents[2].topics
+              eventData = thirdPaymentEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = thirdPaymentEvents[0].topics
+              eventData = thirdPaymentEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(thirdSpend)
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = thirdPaymentEvents[1].topics
+              eventData = thirdPaymentEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current tier index, and sender address for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(defaultTier)
+              web3.toDecimal(eventTopics[3]).should.be.eq(web3.toDecimal(purchaserList[1]))
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(thirdSpend / tierPrices[1])
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -2057,11 +3547,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
             storage.address, executionID, purchaserList[1]
           ).should.be.fulfilled
           balanceInfo.toNumber().should.be.eq(thirdSpend / tierPrices[1])
-        })
-
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = web3.eth.getBalance(teamWallet)
-          teamBalance.toNumber().should.be.eq(initialSpend + thirdSpend)
         })
 
         it('should correctly update the token total supply', async () => {
@@ -2128,7 +3613,8 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         context('sender is buying above minimum contribution', async () => {
 
           let purchaseCalldata
-          let purchaseEvent
+          let purchaseEvents
+          let purchaseReturn
           let sendAmount
 
           beforeEach(async () => {
@@ -2143,41 +3629,138 @@ contract('#MintedCappedBuyTokens', function (accounts) {
             ).should.be.fulfilled
             purchaseCalldata.should.not.eq('0x')
 
-            let events = await storage.exec(
+            purchaseReturn = await storage.exec.call(
+              crowdsaleBuyMock.address, executionID, purchaseCalldata,
+              { from: exec, value: sendAmount }
+            ).should.be.fulfilled
+
+            purchaseEvents = await storage.exec(
               crowdsaleBuyMock.address, executionID, purchaseCalldata,
               { from: exec, value: sendAmount }
             ).then((tx) => {
-              return tx.logs
+              return tx.receipt.logs
             })
-            events.should.not.eq(null)
-            events.length.should.be.eq(2)
-            purchaseEvent = events[0]
-            events[1].event.should.be.eq('ApplicationExecution')
           })
 
-          describe('payment results', async () => {
+          describe('returned data', async () => {
 
-            it('should emit a DeliveredPayment event', async () => {
-              purchaseEvent.event.should.be.eq('DeliveredPayment')
+            it('should return a tuple with 3 fields', async () => {
+              purchaseReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              purchaseReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              purchaseReturn[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              purchaseReturn[2].toNumber().should.be.eq(9)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should emit a total of 3 events', async () => {
+              purchaseEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[2].topics
+                eventData = purchaseEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
             })
 
             describe('the DeliveredPayment event', async () => {
 
-              it('should match the execution ID', async () => {
-                let emittedExecID = purchaseEvent.args['execution_id']
-                emittedExecID.should.be.eq(executionID)
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[0].topics
+                eventData = purchaseEvents[0].data
               })
 
-              it('should match the team wallet destination address', async () => {
-                let destination = purchaseEvent.args['destination']
-                destination.should.be.eq(teamWallet)
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
               })
 
-              it('should match the initial spend amount', async () => {
-                let sent = purchaseEvent.args['amount']
-                sent.toNumber().should.be.eq(sendAmount)
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(sendAmount)
               })
             })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[1].topics
+                eventData = purchaseEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current tier index, and sender address for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(defaultTier)
+                web3.toDecimal(eventTopics[3]).should.be.eq(web3.toDecimal(purchaserList[0]))
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(sendAmount / tierPrices[1])
+              })
+            })
+          })
+
+          describe('payment results', async () => {
 
             it('should have the correct amount of wei raised', async () => {
               let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -2199,11 +3782,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
                 storage.address, executionID, purchaserList[0]
               ).should.be.fulfilled
               balanceInfo.toNumber().should.be.eq(sendAmount / tierPrices[1])
-            })
-
-            it('should have sent the wei to the team wallet', async () => {
-              let teamBalance = web3.eth.getBalance(teamWallet)
-              teamBalance.toNumber().should.be.eq(sendAmount)
             })
 
             it('should correctly update the token total supply', async () => {
@@ -2244,6 +3822,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
 
           let invalidCalldata
           let invalidEvent
+          let invalidReturn
           let invalidAmount
 
           beforeEach(async () => {
@@ -2258,6 +3837,11 @@ contract('#MintedCappedBuyTokens', function (accounts) {
             ).should.be.fulfilled
             invalidCalldata.should.not.eq('0x')
 
+            invalidReturn = await storage.exec.call(
+              crowdsaleBuyMock.address, executionID, invalidCalldata,
+              { from: exec, value: invalidAmount }
+            ).should.be.fulfilled
+
             let events = await storage.exec(
               crowdsaleBuyMock.address, executionID, invalidCalldata,
               { from: exec, value: invalidAmount }
@@ -2267,6 +3851,25 @@ contract('#MintedCappedBuyTokens', function (accounts) {
             events.should.not.eq(null)
             events.length.should.be.eq(1)
             invalidEvent = events[0]
+          })
+
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              invalidReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              invalidReturn[0].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              invalidReturn[1].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              invalidReturn[2].toNumber().should.be.eq(0)
+            })
           })
 
           it('should emit an ApplicationException event', async () => {
@@ -2291,7 +3894,7 @@ contract('#MintedCappedBuyTokens', function (accounts) {
             })
           })
 
-          describe('the resulting crowdsale storage', async () => {
+          describe('storage', async () => {
 
             it('should have an initialized crowdsale', async () => {
               let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -2317,11 +3920,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
               tokenInfo[2].toNumber().should.be.eq(0)
               tokenInfo[3].toNumber().should.be.eq(0)
             })
-
-            it('should have an unchanged team wallet balance', async () => {
-              let curTeamBalance = web3.eth.getBalance(teamWallet).toNumber()
-              curTeamBalance.should.be.eq(teamWalletInitBalance)
-            })
           })
         })
       })
@@ -2331,7 +3929,8 @@ contract('#MintedCappedBuyTokens', function (accounts) {
         context('sender purchases every token in a tier', async () => {
 
           let purchaseCalldata
-          let purchaseEvent
+          let purchaseEvents
+          let purchaseReturn
           let sendAmount
 
           let deliverAmount
@@ -2349,41 +3948,138 @@ contract('#MintedCappedBuyTokens', function (accounts) {
             ).should.be.fulfilled
             purchaseCalldata.should.not.eq('0x')
 
-            let events = await storage.exec(
+            purchaseReturn = await storage.exec.call(
+              crowdsaleBuyMock.address, executionID, purchaseCalldata,
+              { from: exec, value: sendAmount }
+            ).should.be.fulfilled
+
+            purchaseEvents = await storage.exec(
               crowdsaleBuyMock.address, executionID, purchaseCalldata,
               { from: exec, value: sendAmount }
             ).then((tx) => {
-              return tx.logs
+              return tx.receipt.logs
             })
-            events.should.not.eq(null)
-            events.length.should.be.eq(2)
-            purchaseEvent = events[0]
-            events[1].event.should.be.eq('ApplicationExecution')
           })
 
-          describe('payment results', async () => {
+          describe('returned data', async () => {
 
-            it('should emit a DeliveredPayment event', async () => {
-              purchaseEvent.event.should.be.eq('DeliveredPayment')
+            it('should return a tuple with 3 fields', async () => {
+              purchaseReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              purchaseReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              purchaseReturn[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              purchaseReturn[2].toNumber().should.be.eq(9)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should emit a total of 3 events', async () => {
+              purchaseEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[2].topics
+                eventData = purchaseEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
             })
 
             describe('the DeliveredPayment event', async () => {
 
-              it('should match the execution ID', async () => {
-                let emittedExecID = purchaseEvent.args['execution_id']
-                emittedExecID.should.be.eq(executionID)
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[0].topics
+                eventData = purchaseEvents[0].data
               })
 
-              it('should match the team wallet destination address', async () => {
-                let destination = purchaseEvent.args['destination']
-                destination.should.be.eq(teamWallet)
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
               })
 
-              it('should match the initial spend amount', async () => {
-                let sent = purchaseEvent.args['amount']
-                sent.toNumber().should.be.eq(deliverAmount)
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(deliverAmount)
               })
             })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = purchaseEvents[1].topics
+                eventData = purchaseEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current tier index, and sender address for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(defaultTier)
+                web3.toDecimal(eventTopics[3]).should.be.eq(web3.toDecimal(purchaserList[0]))
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(deliverAmount / tierPrices[1])
+              })
+            })
+          })
+
+          describe('payment results', async () => {
 
             it('should have the correct amount of wei raised', async () => {
               let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -2405,11 +4101,6 @@ contract('#MintedCappedBuyTokens', function (accounts) {
                 storage.address, executionID, purchaserList[0]
               ).should.be.fulfilled
               balanceInfo.toNumber().should.be.eq(deliverAmount / tierPrices[1])
-            })
-
-            it('should have sent the wei to the team wallet', async () => {
-              let teamBalance = web3.eth.getBalance(teamWallet)
-              teamBalance.toNumber().should.be.eq(deliverAmount)
             })
 
             it('should correctly update the token total supply', async () => {

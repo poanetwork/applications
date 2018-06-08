@@ -1,5 +1,5 @@
 // Abstract storage contract
-let AbstractStorage = artifacts.require('./RegistryStorage')
+let AbstractStorage = artifacts.require('./AbstractStorage')
 // DutchCrowdsale
 let InitDutch = artifacts.require('./InitCrowdsale')
 let DutchBuy = artifacts.require('./CrowdsaleBuyTokens')
@@ -65,6 +65,18 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
   let tokenSymbol = 'TOK'
   let tokenDecimals = 0
 
+  // Event signatures
+  let initHash = web3.sha3('ApplicationInitialized(bytes32,address,address,address)')
+  let finalHash = web3.sha3('ApplicationFinalization(bytes32,address)')
+  let execHash = web3.sha3('ApplicationExecution(bytes32,address)')
+  let payHash = web3.sha3('DeliveredPayment(bytes32,address,uint256)')
+
+  let initTokenHash = web3.sha3('CrowdsaleTokenInit(bytes32,bytes32,bytes32,uint256)')
+  let updateMinHash = web3.sha3('GlobalMinUpdate(bytes32,uint256)')
+  let timeUpdateHash = web3.sha3('CrowdsaleTimeUpdated(bytes32)')
+  let initSaleHash = web3.sha3('CrowdsaleInitialized(bytes32,bytes32,uint256)')
+  let finalSaleHash = web3.sha3('CrowdsaleFinalized(bytes32)')
+
   before(async () => {
     storage = await AbstractStorage.new().should.be.fulfilled
     testUtils = await TestUtils.new().should.be.fulfilled
@@ -123,7 +135,8 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
   describe('#initCrowdsaleToken', async () => {
 
     let initTokenCalldata
-    let initTokenEvent
+    let initTokenEvents
+    let initTokenReturn
 
     describe('crowdsale storage with no initialized token', async () => {
 
@@ -157,6 +170,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
 
       let invalidCalldata
       let invalidEvent
+      let invalidReturn
 
       context('such as an invalid name', async () => {
 
@@ -168,6 +182,11 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           ).should.be.fulfilled
           invalidCalldata.should.not.eq('0x')
 
+          invalidReturn = await storage.exec.call(
+            crowdsaleConsoleMock.address, executionID, invalidCalldata,
+            { from: exec }
+          ).should.be.fulfilled
+
           let events = await storage.exec(
             crowdsaleConsoleMock.address, executionID, invalidCalldata,
             { from: exec }
@@ -177,6 +196,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           events.should.not.eq(null)
           events.length.should.be.eq(1)
           invalidEvent = events[0]
+        })
+
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            invalidReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            invalidReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            invalidReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            invalidReturn[2].toNumber().should.be.eq(0)
+          })
         })
 
         it('should emit an ApplicationException event', async () => {
@@ -201,7 +239,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           })
         })
 
-        describe('the resulting token storage', async () => {
+        describe('storage', async () => {
 
           let tokenInfo
 
@@ -241,6 +279,11 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           ).should.be.fulfilled
           invalidCalldata.should.not.eq('0x')
 
+          invalidReturn = await storage.exec.call(
+            crowdsaleConsoleMock.address, executionID, invalidCalldata,
+            { from: exec }
+          ).should.be.fulfilled
+
           let events = await storage.exec(
             crowdsaleConsoleMock.address, executionID, invalidCalldata,
             { from: exec }
@@ -250,6 +293,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           events.should.not.eq(null)
           events.length.should.be.eq(1)
           invalidEvent = events[0]
+        })
+
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            invalidReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            invalidReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            invalidReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            invalidReturn[2].toNumber().should.be.eq(0)
+          })
         })
 
         it('should emit an ApplicationException event', async () => {
@@ -274,7 +336,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           })
         })
 
-        describe('the resulting token storage', async () => {
+        describe('storage', async () => {
 
           let tokenInfo
 
@@ -315,6 +377,11 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           ).should.be.fulfilled
           invalidCalldata.should.not.eq('0x')
 
+          invalidReturn = await storage.exec.call(
+            crowdsaleConsoleMock.address, executionID, invalidCalldata,
+            { from: exec }
+          ).should.be.fulfilled
+
           let events = await storage.exec(
             crowdsaleConsoleMock.address, executionID, invalidCalldata,
             { from: exec }
@@ -324,6 +391,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           events.should.not.eq(null)
           events.length.should.be.eq(1)
           invalidEvent = events[0]
+        })
+
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            invalidReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            invalidReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            invalidReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            invalidReturn[2].toNumber().should.be.eq(0)
+          })
         })
 
         it('should emit an ApplicationException event', async () => {
@@ -348,7 +434,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           })
         })
 
-        describe('the resulting token storage', async () => {
+        describe('storage', async () => {
 
           let tokenInfo
 
@@ -376,7 +462,6 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
             tokenInfo[3].toNumber().should.be.eq(totalSupply)
           })
         })
-
       })
     })
 
@@ -390,35 +475,107 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           ).should.be.fulfilled
           initTokenCalldata.should.not.eq('0x')
 
-          let events = await storage.exec(
+          initTokenReturn = await storage.exec.call(
+            crowdsaleConsoleMock.address, executionID, initTokenCalldata,
+            { from: exec }
+          ).should.be.fulfilled
+
+          initTokenEvents = await storage.exec(
             crowdsaleConsoleMock.address, executionID, initTokenCalldata,
             { from: exec }
           ).then((tx) => {
-            return tx.logs
-          })
-          events.should.not.eq(null)
-          events.length.should.be.eq(1)
-          initTokenEvent = events[0]
-        })
-
-        it('should emit an ApplicationExecution event', async () => {
-          initTokenEvent.event.should.be.eq('ApplicationExecution')
-        })
-
-        describe('the ApplicationExecution event', async () => {
-
-          it('should match the used execution id', async () => {
-            let emittedExecID = initTokenEvent.args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-          })
-
-          it('should match the CrowdsaleConsole address', async () => {
-            let emittedAppAddr = initTokenEvent.args['script_target']
-            emittedAppAddr.should.be.eq(crowdsaleConsoleMock.address)
+            return tx.receipt.logs
           })
         })
 
-        describe('the resulting token storage', async () => {
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            initTokenReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            initTokenReturn[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            initTokenReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            initTokenReturn[2].toNumber().should.be.eq(3)
+          })
+        })
+
+        describe('events', async () => {
+
+          it('should have emitted 2 events total', async () => {
+            initTokenEvents.length.should.be.eq(2)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = initTokenEvents[1].topics
+              eventData = initTokenEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleConsoleMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              eventData.should.be.eq('0x0')
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = initTokenEvents[0].topics
+              eventData = initTokenEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(initTokenHash))
+            })
+
+            it('should match the exec id, token name, and token symbol for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              hexStrEquals(eventTopics[2], tokenName).should.be.eq(true)
+              hexStrEquals(eventTopics[3], tokenSymbol).should.be.eq(true)
+            })
+
+            it('should contain the number of decimals as the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(tokenDecimals)
+            })
+          })
+        })
+
+        describe('storage', async () => {
 
           let tokenInfo
 
@@ -451,13 +608,18 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
       context('when the sender is not the admin', async () => {
 
         let invalidCalldata
-        let invalidEvent
+        let invalidReturn
 
         beforeEach(async () => {
           invalidCalldata = await consoleUtils.initCrowdsaleToken.call(
             tokenName, tokenSymbol, tokenDecimals, otherContext
           ).should.be.fulfilled
           invalidCalldata.should.not.eq('0x')
+
+          invalidReturn = await storage.exec.call(
+            crowdsaleConsoleMock.address, executionID, invalidCalldata,
+            { from: exec }
+          ).should.be.fulfilled
 
           let events = await storage.exec(
             crowdsaleConsoleMock.address, executionID, invalidCalldata,
@@ -468,6 +630,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           events.should.not.eq(null)
           events.length.should.be.eq(1)
           invalidEvent = events[0]
+        })
+
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            invalidReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            invalidReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            invalidReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            invalidReturn[2].toNumber().should.be.eq(0)
+          })
         })
 
         it('should emit an ApplicationException event', async () => {
@@ -492,7 +673,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           })
         })
 
-        describe('the resulting token storage', async () => {
+        describe('storage', async () => {
 
           let tokenInfo
 
@@ -527,7 +708,8 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
   describe('#updateGlobalMinContribution', async () => {
 
     let updateMinCalldata
-    let updateMinEvent
+    let updateMinEvents
+    let updateMinReturn
 
     let updateTo = 100
     let updateToZero = 0
@@ -536,6 +718,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
 
       let invalidCalldata
       let invalidEvent
+      let invalidReturn
 
       beforeEach(async () => {
         let initTokenCalldata = await consoleUtils.initCrowdsaleToken.call(
@@ -573,6 +756,11 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         events.length.should.be.eq(1)
         events[0].event.should.be.eq('ApplicationExecution')
 
+        invalidReturn = await storage.exec.call(
+          crowdsaleConsoleMock.address, executionID, invalidCalldata,
+          { from: exec }
+        ).should.be.fulfilled
+
         events = await storage.exec(
           crowdsaleConsoleMock.address, executionID, invalidCalldata,
           { from: exec }
@@ -582,6 +770,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         events.should.not.eq(null)
         events.length.should.be.eq(1)
         invalidEvent = events[0]
+      })
+
+      describe('returned data', async () => {
+
+        it('should return a tuple with 3 fields', async () => {
+          invalidReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          invalidReturn[0].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          invalidReturn[1].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          invalidReturn[2].toNumber().should.be.eq(0)
+        })
       })
 
       it('should emit an ApplicationException event', async () => {
@@ -606,7 +813,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         })
       })
 
-      describe('the resulting crowdsale storage', async () => {
+      describe('storage', async () => {
 
         let crowdsaleInfo
 
@@ -664,35 +871,105 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
             ).should.be.fulfilled
             updateMinCalldata.should.not.eq('0x')
 
-            events = await storage.exec(
+            updateMinReturn = await storage.exec.call(
+              crowdsaleConsoleMock.address, executionID, updateMinCalldata,
+              { from: exec }
+            ).should.be.fulfilled
+
+            updateMinEvents = await storage.exec(
               crowdsaleConsoleMock.address, executionID, updateMinCalldata,
               { from: exec }
             ).then((tx) => {
-              return tx.logs
-            })
-            events.should.not.eq(null)
-            events.length.should.be.eq(1)
-            updateMinEvent = events[0]
-          })
-
-          it('should emit an ApplicationExecution event', async () => {
-            updateMinEvent.event.should.be.eq('ApplicationExecution')
-          })
-
-          describe('the ApplicationExecution event', async () => {
-
-            it('should match the used execution id', async () => {
-              let emittedExecID = updateMinEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
-            })
-
-            it('should match the CrowdsaleConsole address', async () => {
-              let emittedAppAddr = updateMinEvent.args['script_target']
-              emittedAppAddr.should.be.eq(crowdsaleConsoleMock.address)
+              return tx.receipt.logs
             })
           })
 
-          describe('the resulting crowdsale storage', async () => {
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              updateMinReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              updateMinReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              updateMinReturn[1].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              updateMinReturn[2].toNumber().should.be.eq(1)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should have emitted 2 events total', async () => {
+              updateMinEvents.length.should.be.eq(2)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = updateMinEvents[1].topics
+                eventData = updateMinEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleConsoleMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                eventData.should.be.eq('0x0')
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = updateMinEvents[0].topics
+                eventData = updateMinEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(2)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(updateMinHash))
+              })
+
+              it('should match the exec id for the other topic', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+          })
+
+          describe('storage', async () => {
 
             let crowdsaleInfo
 
@@ -731,35 +1008,105 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
             ).should.be.fulfilled
             updateMinCalldata.should.not.eq('0x')
 
-            let events = await storage.exec(
+            updateMinReturn = await storage.exec.call(
+              crowdsaleConsoleMock.address, executionID, updateMinCalldata,
+              { from: exec }
+            ).should.be.fulfilled
+
+            updateMinEvents = await storage.exec(
               crowdsaleConsoleMock.address, executionID, updateMinCalldata,
               { from: exec }
             ).then((tx) => {
-              return tx.logs
-            })
-            events.should.not.eq(null)
-            events.length.should.be.eq(1)
-            updateMinEvent = events[0]
-          })
-
-          it('should emit an ApplicationExecution event', async () => {
-            updateMinEvent.event.should.be.eq('ApplicationExecution')
-          })
-
-          describe('the ApplicationExecution event', async () => {
-
-            it('should match the used execution id', async () => {
-              let emittedExecID = updateMinEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
-            })
-
-            it('should match the CrowdsaleConsole address', async () => {
-              let emittedAppAddr = updateMinEvent.args['script_target']
-              emittedAppAddr.should.be.eq(crowdsaleConsoleMock.address)
+              return tx.receipt.logs
             })
           })
 
-          describe('the resulting crowdsale storage', async () => {
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              updateMinReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              updateMinReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              updateMinReturn[1].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              updateMinReturn[2].toNumber().should.be.eq(1)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should have emitted 2 events total', async () => {
+              updateMinEvents.length.should.be.eq(2)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = updateMinEvents[1].topics
+                eventData = updateMinEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleConsoleMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                eventData.should.be.eq('0x0')
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = updateMinEvents[0].topics
+                eventData = updateMinEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(2)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(updateMinHash))
+              })
+
+              it('should match the exec id for the other topic', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should match the updated amount in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(updateTo)
+              })
+            })
+          })
+
+          describe('storage', async () => {
 
             let crowdsaleInfo
 
@@ -795,12 +1142,18 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
 
         let invalidCalldata
         let invalidEvent
+        let invalidReturn
 
         beforeEach(async () => {
           let invalidCalldata = await consoleUtils.updateGlobalMinContribution.call(
             updateTo, otherContext
           ).should.be.fulfilled
           invalidCalldata.should.not.eq('0x')
+
+          invalidReturn = await storage.exec.call(
+            crowdsaleConsoleMock.address, executionID, invalidCalldata,
+            { from: exec }
+          ).should.be.fulfilled
 
           let events = await storage.exec(
             crowdsaleConsoleMock.address, executionID, invalidCalldata,
@@ -811,6 +1164,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           events.should.not.eq(null)
           events.length.should.be.eq(1)
           invalidEvent = events[0]
+        })
+
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            invalidReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            invalidReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            invalidReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            invalidReturn[2].toNumber().should.be.eq(0)
+          })
         })
 
         it('should emit an ApplicationException event', async () => {
@@ -835,7 +1207,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           })
         })
 
-        describe('the resulting crowdsale storage', async () => {
+        describe('storage', async () => {
 
           let crowdsaleInfo
 
@@ -871,7 +1243,8 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
   describe('#whitelistMulti', async () => {
 
     let whitelistCalldata
-    let whitelistEvent
+    let whitelistEvents
+    let whitelistReturn
 
     let multiWhitelist = [
       accounts[accounts.length - 1],
@@ -899,6 +1272,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
 
       let invalidCalldata
       let invalidEvent
+      let invalidReturn
 
       context('such as mismatched input lengths', async () => {
 
@@ -910,6 +1284,11 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           ).should.be.fulfilled
           invalidCalldata.should.not.eq('0x')
 
+          invalidReturn = await storage.exec.call(
+            crowdsaleConsoleMock.address, executionID, invalidCalldata,
+            { from: exec }
+          ).should.be.fulfilled
+
           let events = await storage.exec(
             crowdsaleConsoleMock.address, executionID, invalidCalldata,
             { from: exec }
@@ -920,6 +1299,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           events.length.should.be.eq(1)
 
           invalidEvent = events[0]
+        })
+
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            invalidReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            invalidReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            invalidReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            invalidReturn[2].toNumber().should.be.eq(0)
+          })
         })
 
         it('should emit an ApplicationException event', async () => {
@@ -944,7 +1342,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           })
         })
 
-        describe('the resulting whitelist storage', async () => {
+        describe('storage', async () => {
 
           it('should have a whitelist of length 0', async () => {
             let whitelistInfo = await initCrowdsale.getCrowdsaleWhitelist.call(
@@ -992,6 +1390,11 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           ).should.be.fulfilled
           invalidCalldata.should.not.eq('0x')
 
+          invalidReturn = await storage.exec.call(
+            crowdsaleConsoleMock.address, executionID, invalidCalldata,
+            { from: exec }
+          ).should.be.fulfilled
+
           let events = await storage.exec(
             crowdsaleConsoleMock.address, executionID, invalidCalldata,
             { from: exec }
@@ -1002,6 +1405,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           events.length.should.be.eq(1)
 
           invalidEvent = events[0]
+        })
+
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            invalidReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            invalidReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            invalidReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            invalidReturn[2].toNumber().should.be.eq(0)
+          })
         })
 
         it('should emit an ApplicationException event', async () => {
@@ -1026,7 +1448,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           })
         })
 
-        describe('the resulting whitelist storage', async () => {
+        describe('storage', async () => {
 
           it('should have a whitelist of length 0', async () => {
             let whitelistInfo = await initCrowdsale.getCrowdsaleWhitelist.call(
@@ -1053,36 +1475,77 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
             ).should.be.fulfilled
             whitelistCalldata.should.not.eq('0x')
 
-            let events = await storage.exec(
+            whitelistReturn = await storage.exec.call(
+              crowdsaleConsoleMock.address, executionID, whitelistCalldata,
+              { from: exec }
+            ).should.be.fulfilled
+
+            whitelistEvents = await storage.exec(
               crowdsaleConsoleMock.address, executionID, whitelistCalldata,
               { from: exec }
             ).then((tx) => {
-              return tx.logs
-            })
-            events.should.not.eq(null)
-            events.length.should.be.eq(1)
-
-            whitelistEvent = events[0]
-          })
-
-          it('should emit an ApplicationExecution event', async () => {
-            whitelistEvent.event.should.be.eq('ApplicationExecution')
-          })
-
-          describe('the ApplicationExecution event', async () => {
-
-            it('should match the used execution id', async () => {
-              let emittedExecID = whitelistEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
-            })
-
-            it('should match the CrowdsaleConsole address', async () => {
-              let emittedAppAddr = whitelistEvent.args['script_target']
-              emittedAppAddr.should.be.eq(crowdsaleConsoleMock.address)
+              return tx.receipt.logs
             })
           })
 
-          describe('the resulting whitelist storage', async () => {
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              whitelistReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              whitelistReturn[0].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              whitelistReturn[1].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              whitelistReturn[2].toNumber().should.be.eq(10)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should have emitted 1 events total', async () => {
+              whitelistEvents.length.should.be.eq(1)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = whitelistEvents[0].topics
+                eventData = whitelistEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleConsoleMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+          })
+
+          describe('storage', async () => {
 
             it('should have a whitelist of length 3', async () => {
               let whitelistInfo = await initCrowdsale.getCrowdsaleWhitelist.call(
@@ -1131,36 +1594,77 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
             ).should.be.fulfilled
             whitelistCalldata.should.not.eq('0x')
 
-            let events = await storage.exec(
+            whitelistReturn = await storage.exec.call(
+              crowdsaleConsoleMock.address, executionID, whitelistCalldata,
+              { from: exec }
+            ).should.be.fulfilled
+
+            whitelistEvents = await storage.exec(
               crowdsaleConsoleMock.address, executionID, whitelistCalldata,
               { from: exec }
             ).then((tx) => {
-              return tx.logs
-            })
-            events.should.not.eq(null)
-            events.length.should.be.eq(1)
-
-            whitelistEvent = events[0]
-          })
-
-          it('should emit an ApplicationExecution event', async () => {
-            whitelistEvent.event.should.be.eq('ApplicationExecution')
-          })
-
-          describe('the ApplicationExecution event', async () => {
-
-            it('should match the used execution id', async () => {
-              let emittedExecID = whitelistEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
-            })
-
-            it('should match the CrowdsaleConsole address', async () => {
-              let emittedAppAddr = whitelistEvent.args['script_target']
-              emittedAppAddr.should.be.eq(crowdsaleConsoleMock.address)
+              return tx.receipt.logs
             })
           })
 
-          describe('the resulting whitelist storage', async () => {
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              whitelistReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              whitelistReturn[0].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              whitelistReturn[1].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              whitelistReturn[2].toNumber().should.be.eq(4)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should have emitted 1 events total', async () => {
+              whitelistEvents.length.should.be.eq(1)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = whitelistEvents[0].topics
+                eventData = whitelistEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleConsoleMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+          })
+
+          describe('storage', async () => {
 
             it('should have a whitelist of length 1', async () => {
               let whitelistInfo = await initCrowdsale.getCrowdsaleWhitelist.call(
@@ -1190,12 +1694,18 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
 
         let invalidCalldata
         let invalidEvent
+        let invalidReturn
 
         beforeEach(async () => {
           invalidCalldata = await consoleUtils.whitelistMulti.call(
             multiWhitelist, multiMinimum, multiMaximum, otherContext
           ).should.be.fulfilled
           invalidCalldata.should.not.eq('0x')
+
+          invalidReturn = await storage.exec.call(
+            crowdsaleConsoleMock.address, executionID, invalidCalldata,
+            { from: exec }
+          ).should.be.fulfilled
 
           let events = await storage.exec(
             crowdsaleConsoleMock.address, executionID, invalidCalldata,
@@ -1207,6 +1717,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           events.length.should.be.eq(1)
 
           invalidEvent = events[0]
+        })
+
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            invalidReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            invalidReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            invalidReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            invalidReturn[2].toNumber().should.be.eq(0)
+          })
         })
 
         it('should emit an ApplicationException event', async () => {
@@ -1231,7 +1760,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           })
         })
 
-        describe('the resulting whitelist storage', async () => {
+        describe('storage', async () => {
 
           it('should have a whitelist of length 0', async () => {
             let whitelistInfo = await initCrowdsale.getCrowdsaleWhitelist.call(
@@ -1277,7 +1806,8 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
     let newStartTime
 
     let updateCalldata
-    let updateEvent
+    let updateEvents
+    let updateReturn
 
     beforeEach(async () => {
       newStartTime = getTime() + 4000
@@ -1302,6 +1832,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
 
       let invalidCalldata
       let invalidEvent
+      let invalidReturn
 
       beforeEach(async () => {
         let initCrowdsaleCalldata = await consoleUtils.initializeCrowdsale.call(
@@ -1324,6 +1855,11 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         events.length.should.be.eq(1)
         events[0].event.should.be.eq('ApplicationExecution')
 
+        invalidReturn = await storage.exec.call(
+          crowdsaleConsoleMock.address, executionID, invalidCalldata,
+          { from: exec }
+        ).should.be.fulfilled
+
         events = await storage.exec(
           crowdsaleConsoleMock.address, executionID, invalidCalldata,
           { from: exec }
@@ -1333,6 +1869,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         events.should.not.eq(null)
         events.length.should.be.eq(1)
         invalidEvent = events[0]
+      })
+
+      describe('returned data', async () => {
+
+        it('should return a tuple with 3 fields', async () => {
+          invalidReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          invalidReturn[0].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          invalidReturn[1].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          invalidReturn[2].toNumber().should.be.eq(0)
+        })
       })
 
       it('should emit an ApplicationException event', async () => {
@@ -1357,7 +1912,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         })
       })
 
-      describe('the resulting crowdsale storage', async () => {
+      describe('storage', async () => {
 
         it('should have unchanged start time and duration', async () => {
           let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
@@ -1380,6 +1935,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
 
         let invalidCalldata
         let invalidEvent
+        let invalidReturn
 
         beforeEach(async () => {
 
@@ -1387,6 +1943,11 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
             invalidStartTime, invalidDuration, adminContext
           ).should.be.fulfilled
           invalidCalldata.should.not.eq('0x')
+
+          invalidReturn = await storage.exec.call(
+            crowdsaleConsoleMock.address, executionID, invalidCalldata,
+            { from: exec }
+          ).should.be.fulfilled
 
           let events = await storage.exec(
             crowdsaleConsoleMock.address, executionID, invalidCalldata,
@@ -1397,6 +1958,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           events.should.not.eq(null)
           events.length.should.be.eq(1)
           invalidEvent = events[0]
+        })
+
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            invalidReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            invalidReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            invalidReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            invalidReturn[2].toNumber().should.be.eq(0)
+          })
         })
 
         it('should emit an ApplicationException event', async () => {
@@ -1421,7 +2001,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           })
         })
 
-        describe('the resulting crowdsale storage', async () => {
+        describe('storage', async () => {
 
           it('should have unchanged start time and duration', async () => {
             let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
@@ -1441,6 +2021,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
 
           let invalidCalldata
           let invalidEvent
+          let invalidReturn
 
           beforeEach(async () => {
 
@@ -1448,6 +2029,11 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
               newStartTime, newDuration, otherContext
             ).should.be.fulfilled
             invalidCalldata.should.not.eq('0x')
+
+            invalidReturn = await storage.exec.call(
+              crowdsaleConsoleMock.address, executionID, invalidCalldata,
+              { from: exec }
+            ).should.be.fulfilled
 
             let events = await storage.exec(
               crowdsaleConsoleMock.address, executionID, invalidCalldata,
@@ -1458,6 +2044,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
             events.should.not.eq(null)
             events.length.should.be.eq(1)
             invalidEvent = events[0]
+          })
+
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              invalidReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              invalidReturn[0].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              invalidReturn[1].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              invalidReturn[2].toNumber().should.be.eq(0)
+            })
           })
 
           it('should emit an ApplicationException event', async () => {
@@ -1482,7 +2087,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
             })
           })
 
-          describe('the resulting crowdsale storage', async () => {
+          describe('storage', async () => {
 
             it('should have unchanged start time and duration', async () => {
               let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
@@ -1505,36 +2110,105 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
             ).should.be.fulfilled
             updateCalldata.should.not.eq('0x')
 
-            let events = await storage.exec(
+            updateReturn = await storage.exec.call(
+              crowdsaleConsoleMock.address, executionID, updateCalldata,
+              { from: exec }
+            ).should.be.fulfilled
+
+            updateEvents = await storage.exec(
               crowdsaleConsoleMock.address, executionID, updateCalldata,
               { from: exec }
             ).then((tx) => {
-              return tx.logs
-            })
-            events.should.not.eq(null)
-            events.length.should.be.eq(1)
-
-            updateEvent = events[0]
-          })
-
-          it('should emit an ApplicationExecution event', async () => {
-            updateEvent.event.should.be.eq('ApplicationExecution')
-          })
-
-          describe('the ApplicationExecution event', async () => {
-
-            it('should match the used execution id', async () => {
-              let emittedExecID = updateEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
-            })
-
-            it('should match the CrowdsaleConsole address', async () => {
-              let emittedAppAddr = updateEvent.args['script_target']
-              emittedAppAddr.should.be.eq(crowdsaleConsoleMock.address)
+              return tx.receipt.logs
             })
           })
 
-          describe('the resulting crowdsale storage', async () => {
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              updateReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              updateReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              updateReturn[1].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              updateReturn[2].toNumber().should.be.eq(2)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should have emitted 2 events total', async () => {
+              updateEvents.length.should.be.eq(2)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = updateEvents[1].topics
+                eventData = updateEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleConsoleMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = updateEvents[0].topics
+                eventData = updateEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(2)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(timeUpdateHash))
+              })
+
+              it('should match the exec id for the other topic', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+          })
+
+          describe('storage', async () => {
 
             it('should have correctly updated the start time and duration', async () => {
               let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
@@ -1553,13 +2227,15 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
 
   describe('#initializeCrowdsale', async () => {
 
-    let initCrCalldata
-    let initCrEvent
+    let initSaleCalldata
+    let initSaleEvents
+    let initSaleReturn
 
     context('when the crowdsale has already started', async () => {
 
       let invalidCalldata
       let invalidEvent
+      let invalidReturn
 
       beforeEach(async () => {
         let initTokenCalldata = await consoleUtils.initCrowdsaleToken.call(
@@ -1586,6 +2262,11 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         let storedTime = await crowdsaleConsoleMock.getTime().should.be.fulfilled
         storedTime.toNumber().should.be.eq(startTime + 1)
 
+        invalidReturn = await storage.exec.call(
+          crowdsaleConsoleMock.address, executionID, invalidCalldata,
+          { from: exec }
+        ).should.be.fulfilled
+
         events = await storage.exec(
           crowdsaleConsoleMock.address, executionID, invalidCalldata,
           { from: exec }
@@ -1596,6 +2277,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         events.length.should.be.eq(1)
 
         invalidEvent = events[0]
+      })
+
+      describe('returned data', async () => {
+
+        it('should return a tuple with 3 fields', async () => {
+          invalidReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          invalidReturn[0].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          invalidReturn[1].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          invalidReturn[2].toNumber().should.be.eq(0)
+        })
       })
 
       it('should emit an ApplicationException event', async () => {
@@ -1620,7 +2320,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         })
       })
 
-      describe('the resulting crowdsale storage', async () => {
+      describe('storage', async () => {
 
         it('should have an initialized token', async () => {
           let tokenInfo = await initCrowdsale.getTokenInfo.call(
@@ -1655,12 +2355,18 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
 
         let invalidCalldata
         let invalidEvent
+        let invalidReturn
 
         beforeEach(async () => {
           invalidCalldata = await consoleUtils.initializeCrowdsale.call(
             adminContext
           ).should.be.fulfilled
           invalidCalldata.should.not.eq('0x')
+
+          invalidReturn = await storage.exec.call(
+            crowdsaleConsoleMock.address, executionID, invalidCalldata,
+            { from: exec }
+          ).should.be.fulfilled
 
           let events = await storage.exec(
             crowdsaleConsoleMock.address, executionID, invalidCalldata,
@@ -1672,6 +2378,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           events.length.should.be.eq(1)
 
           invalidEvent = events[0]
+        })
+
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            invalidReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            invalidReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            invalidReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            invalidReturn[2].toNumber().should.be.eq(0)
+          })
         })
 
         it('should emit an ApplicationException event', async () => {
@@ -1696,7 +2421,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           })
         })
 
-        describe('the resulting crowdsale storage', async () => {
+        describe('storage', async () => {
 
           it('should have an uninitialized token', async () => {
             let tokenInfo = await initCrowdsale.getTokenInfo.call(
@@ -1748,12 +2473,18 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
 
           let invalidCalldata
           let invalidEvent
+          let invalidReturn
 
           beforeEach(async () => {
             invalidCalldata = await consoleUtils.initializeCrowdsale.call(
               otherContext
             ).should.be.fulfilled
             invalidCalldata.should.not.eq('0x')
+
+            invalidReturn = await storage.exec.call(
+              crowdsaleConsoleMock.address, executionID, invalidCalldata,
+              { from: exec }
+            ).should.be.fulfilled
 
             let events = await storage.exec(
               crowdsaleConsoleMock.address, executionID, invalidCalldata,
@@ -1765,6 +2496,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
             events.length.should.be.eq(1)
 
             invalidEvent = events[0]
+          })
+
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              invalidReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              invalidReturn[0].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              invalidReturn[1].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              invalidReturn[2].toNumber().should.be.eq(0)
+            })
           })
 
           it('should emit an ApplicationException event', async () => {
@@ -1789,7 +2539,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
             })
           })
 
-          describe('the resulting crowdsale storage', async () => {
+          describe('storage', async () => {
 
             it('should have an initialized token', async () => {
               let tokenInfo = await initCrowdsale.getTokenInfo.call(
@@ -1821,41 +2571,111 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         context('and the sender is the admin', async () => {
 
           beforeEach(async () => {
-            initCrCalldata = await consoleUtils.initializeCrowdsale.call(
+            initSaleCalldata = await consoleUtils.initializeCrowdsale.call(
               adminContext
             ).should.be.fulfilled
-            initCrCalldata.should.not.eq('0x')
+            initSaleCalldata.should.not.eq('0x')
 
-            let events = await storage.exec(
-              crowdsaleConsoleMock.address, executionID, initCrCalldata,
+            initSaleReturn = await storage.exec.call(
+              crowdsaleConsoleMock.address, executionID, initSaleCalldata,
+              { from: exec }
+            ).should.be.fulfilled
+
+            initSaleEvents = await storage.exec(
+              crowdsaleConsoleMock.address, executionID, initSaleCalldata,
               { from: exec }
             ).then((tx) => {
-              return tx.logs
-            })
-            events.should.not.eq(null)
-            events.length.should.be.eq(1)
-
-            initCrEvent = events[0]
-          })
-
-          it('should emit an ApplicationExecution event', async () => {
-            initCrEvent.event.should.be.eq('ApplicationExecution')
-          })
-
-          describe('the ApplicationExecution event', async () => {
-
-            it('should match the used execution id', async () => {
-              let emittedExecID = initCrEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
-            })
-
-            it('should match the CrowdsaleConsole address', async () => {
-              let emittedAppAddr = initCrEvent.args['script_target']
-              emittedAppAddr.should.be.eq(crowdsaleConsoleMock.address)
+              return tx.receipt.logs
             })
           })
 
-          describe('the resulting crowdsale storage', async () => {
+          describe('returned data', async () => {
+
+            it('should return a tuple with 3 fields', async () => {
+              initSaleReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              initSaleReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              initSaleReturn[1].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              initSaleReturn[2].toNumber().should.be.eq(1)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should have emitted 2 events total', async () => {
+              initSaleEvents.length.should.be.eq(2)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = initSaleEvents[1].topics
+                eventData = initSaleEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleConsoleMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = initSaleEvents[0].topics
+                eventData = initSaleEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(initSaleHash))
+              })
+
+              it('should match the exec id and token name for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                hexStrEquals(eventTopics[2], tokenName).should.be.eq(true)
+              })
+
+              it('should match the start time in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(startTime)
+              })
+            })
+          })
+
+          describe('storage', async () => {
 
             it('should have an initialized token', async () => {
               let tokenInfo = await initCrowdsale.getTokenInfo.call(
@@ -1890,18 +2710,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
   describe('#finalizeCrowdsale', async () => {
 
     let finalizeCalldata
-    let finalizeEvent
+    let finalizeEvents
+    let finalizeReturn
 
     context('when the crowdsale is not yet intialized', async () => {
 
       let invalidCalldata
       let invalidEvent
+      let invalidReturn
 
       beforeEach(async () => {
         invalidCalldata = await consoleUtils.finalizeCrowdsale.call(
           adminContext
         ).should.be.fulfilled
         invalidCalldata.should.not.eq('0x')
+
+        invalidReturn = await storage.exec.call(
+          crowdsaleConsoleMock.address, executionID, invalidCalldata,
+          { from: exec }
+        ).should.be.fulfilled
 
         let events = await storage.exec(
           crowdsaleConsoleMock.address, executionID, invalidCalldata,
@@ -1913,6 +2740,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         events.length.should.be.eq(1)
 
         invalidEvent = events[0]
+      })
+
+      describe('returned data', async () => {
+
+        it('should return a tuple with 3 fields', async () => {
+          invalidReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          invalidReturn[0].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          invalidReturn[1].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          invalidReturn[2].toNumber().should.be.eq(0)
+        })
       })
 
       it('should emit an ApplicationException event', async () => {
@@ -1937,7 +2783,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         })
       })
 
-      describe('the resulting crowdsale storage', async () => {
+      describe('storage', async () => {
 
         it('should have an uninitialized token', async () => {
           let tokenInfo = await initCrowdsale.getTokenInfo.call(
@@ -1970,6 +2816,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
 
       let invalidCalldata
       let invalidEvent
+      let invalidReturn
 
       beforeEach(async () => {
         let initTokenCalldata = await consoleUtils.initCrowdsaleToken.call(
@@ -2017,6 +2864,11 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         events.length.should.be.eq(1)
         events[0].event.should.be.eq('ApplicationExecution')
 
+        invalidReturn = await storage.exec.call(
+          crowdsaleConsoleMock.address, executionID, invalidCalldata,
+          { from: exec }
+        ).should.be.fulfilled
+
         events = await storage.exec(
           crowdsaleConsoleMock.address, executionID, invalidCalldata,
           { from: exec }
@@ -2027,6 +2879,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         events.length.should.be.eq(1)
 
         invalidEvent = events[0]
+      })
+
+      describe('returned data', async () => {
+
+        it('should return a tuple with 3 fields', async () => {
+          invalidReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          invalidReturn[0].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          invalidReturn[1].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          invalidReturn[2].toNumber().should.be.eq(0)
+        })
       })
 
       it('should emit an ApplicationException event', async () => {
@@ -2051,7 +2922,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
         })
       })
 
-      describe('the resulting crowdsale storage', async () => {
+      describe('storage', async () => {
 
         it('should have an initialized token', async () => {
           let tokenInfo = await initCrowdsale.getTokenInfo.call(
@@ -2120,6 +2991,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
 
         let invalidCalldata
         let invalidEvent
+        let invalidReturn
 
         beforeEach(async () => {
 
@@ -2127,6 +2999,11 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
             otherContext
           ).should.be.fulfilled
           invalidCalldata.should.not.eq('0x')
+
+          invalidReturn = await storage.exec.call(
+            crowdsaleConsoleMock.address, executionID, invalidCalldata,
+            { from: exec }
+          ).should.be.fulfilled
 
           events = await storage.exec(
             crowdsaleConsoleMock.address, executionID, invalidCalldata,
@@ -2138,6 +3015,25 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           events.length.should.be.eq(1)
 
           invalidEvent = events[0]
+        })
+
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            invalidReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            invalidReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            invalidReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            invalidReturn[2].toNumber().should.be.eq(0)
+          })
         })
 
         it('should emit an ApplicationException event', async () => {
@@ -2162,7 +3058,7 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           })
         })
 
-        describe('the resulting crowdsale storage', async () => {
+        describe('storage', async () => {
 
           it('should have an initialized token', async () => {
             let tokenInfo = await initCrowdsale.getTokenInfo.call(
@@ -2201,36 +3097,105 @@ contract('#DutchCrowdsaleConsole', function (accounts) {
           ).should.be.fulfilled
           finalizeCalldata.should.not.eq('0x')
 
-          events = await storage.exec(
+          finalizeReturn = await storage.exec.call(
+            crowdsaleConsoleMock.address, executionID, finalizeCalldata,
+            { from: exec }
+          ).should.be.fulfilled
+
+          finalizeEvents = await storage.exec(
             crowdsaleConsoleMock.address, executionID, finalizeCalldata,
             { from: exec }
           ).then((tx) => {
-            return tx.logs
-          })
-          events.should.not.eq(null)
-          events.length.should.be.eq(1)
-
-          finalizeEvent = events[0]
-        })
-
-        it('should emit an ApplicationExecution event', async () => {
-          finalizeEvent.event.should.be.eq('ApplicationExecution')
-        })
-
-        describe('the ApplicationExecution event', async () => {
-
-          it('should match the used execution id', async () => {
-            let emittedExecID = finalizeEvent.args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-          })
-
-          it('should match the CrowdsaleConsole address', async () => {
-            let emittedAppAddr = finalizeEvent.args['script_target']
-            emittedAppAddr.should.be.eq(crowdsaleConsoleMock.address)
+            return tx.receipt.logs
           })
         })
 
-        describe('the resulting crowdsale storage', async () => {
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            finalizeReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            finalizeReturn[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            finalizeReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            finalizeReturn[2].toNumber().should.be.eq(1)
+          })
+        })
+
+        describe('events', async () => {
+
+          it('should have emitted 2 events total', async () => {
+            finalizeEvents.length.should.be.eq(2)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = finalizeEvents[1].topics
+              eventData = finalizeEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleConsoleMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = finalizeEvents[0].topics
+              eventData = finalizeEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(2)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(finalSaleHash))
+            })
+
+            it('should match the exec id for the other topic', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+        })
+
+        describe('storage', async () => {
 
           it('should have an initialized token', async () => {
             let tokenInfo = await initCrowdsale.getTokenInfo.call(

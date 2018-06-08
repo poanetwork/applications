@@ -1,5 +1,5 @@
 // Abstract storage contract
-let AbstractStorage = artifacts.require('./RegistryStorage')
+let AbstractStorage = artifacts.require('./AbstractStorage')
 // DutchCrowdsale
 let InitDutch = artifacts.require('./InitCrowdsale')
 let DutchBuy = artifacts.require('./CrowdsaleBuyTokens')
@@ -71,6 +71,16 @@ contract('#TokenConsole', function (accounts) {
   let tokenSymbol = 'TOK'
   let tokenDecimals = 18
 
+  // Event signatures
+  let initHash = web3.sha3('ApplicationInitialized(bytes32,address,address,address)')
+  let finalHash = web3.sha3('ApplicationFinalization(bytes32,address)')
+  let execHash = web3.sha3('ApplicationExecution(bytes32,address)')
+  let payHash = web3.sha3('DeliveredPayment(bytes32,address,uint256)')
+
+  let transferHash = web3.sha3('Transfer(address,address,uint256)')
+  let approvalHash = web3.sha3('Approval(address,address,uint256)')
+  let transferAgentHash = web3.sha3('TransferAgentStatusUpdate(bytes32,address,bool)')
+
   before(async () => {
     storage = await AbstractStorage.new().should.be.fulfilled
     testUtils = await TestUtils.new().should.be.fulfilled
@@ -130,12 +140,14 @@ contract('#TokenConsole', function (accounts) {
   context('setTransferAgentStatus', async () => {
 
     let agentCalldata
-    let agentEvent
+    let agentEvents
+    let agentReturn
 
     context('when the input agent is address 0', async () => {
 
       let invalidCalldata
       let invalidEvent
+      let invalidReturn
 
       let invalidAddress = zeroAddress()
 
@@ -145,6 +157,11 @@ contract('#TokenConsole', function (accounts) {
         ).should.be.fulfilled
         invalidCalldata.should.not.eq('0x')
 
+        invalidReturn = await storage.exec.call(
+          tokenConsole.address, executionID, invalidCalldata,
+          { from: exec }
+        ).should.be.fulfilled
+
         let events = await storage.exec(
           tokenConsole.address, executionID, invalidCalldata,
           { from: exec }
@@ -153,8 +170,26 @@ contract('#TokenConsole', function (accounts) {
         })
         events.should.not.eq(null)
         events.length.should.be.eq(1)
-
         invalidEvent = events[0]
+      })
+
+      describe('returned data', async () => {
+
+        it('should return a tuple with 3 fields', async () => {
+          invalidReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          invalidReturn[0].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          invalidReturn[1].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          invalidReturn[2].toNumber().should.be.eq(0)
+        })
       })
 
       it('should emit an ApplicationException event', async () => {
@@ -168,7 +203,7 @@ contract('#TokenConsole', function (accounts) {
           emittedExecID.should.be.eq(executionID)
         })
 
-        it('should match the TokenConsole address', async () => {
+        it('should match the TokenTransfer address', async () => {
           let emittedAppAddr = invalidEvent.args['application_address']
           emittedAppAddr.should.be.eq(tokenConsole.address)
         })
@@ -179,11 +214,14 @@ contract('#TokenConsole', function (accounts) {
         })
       })
 
-      it('should not record the zero address as a transfer agent', async () => {
-        let agentInfo = await initCrowdsale.getTransferAgentStatus.call(
-          storage.address, executionID, invalidAddress
-        ).should.be.fulfilled
-        agentInfo.should.not.eq(true)
+      describe('storage', async () => {
+
+        it('should not record the zero address as a transfer agent', async () => {
+          let agentInfo = await initCrowdsale.getTransferAgentStatus.call(
+            storage.address, executionID, invalidAddress
+          ).should.be.fulfilled
+          agentInfo.should.not.eq(true)
+        })
       })
     })
 
@@ -210,67 +248,140 @@ contract('#TokenConsole', function (accounts) {
         events.length.should.be.eq(1)
         events[0].event.should.be.eq('ApplicationExecution')
 
-        events = await storage.exec(
+        agentReturn = await storage.exec.call(
+          tokenConsole.address, executionID, agentCalldata,
+          { from: exec }
+        ).should.be.fulfilled
+
+        agentEvents = await storage.exec(
           tokenConsole.address, executionID, agentCalldata,
           { from: exec }
         ).then((tx) => {
-          return tx.logs
-        })
-        events.should.not.eq(null)
-        events.length.should.be.eq(1)
-
-        agentEvent = events[0]
-      })
-
-      it('should emit an ApplicationExecution event', async () => {
-        agentEvent.event.should.be.eq('ApplicationExecution')
-      })
-
-      describe('the ApplicationExecution event', async () => {
-
-        it('should match the used execution id', async () => {
-          let emittedExecID = agentEvent.args['execution_id']
-          emittedExecID.should.be.eq(executionID)
-        })
-
-        it('should match the TokenConsole address', async () => {
-          let emittedAppAddr = agentEvent.args['script_target']
-          emittedAppAddr.should.be.eq(tokenConsole.address)
+          return tx.receipt.logs
         })
       })
 
-      it('should accurately record the transfer agent\'s status', async () => {
-        let agentInfo = await initCrowdsale.getTransferAgentStatus.call(
-          storage.address, executionID, otherAddress
-        ).should.be.fulfilled
-        agentInfo.should.be.eq(true)
+      describe('returned data', async () => {
+
+        it('should return a tuple with 3 fields', async () => {
+          agentReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          agentReturn[0].toNumber().should.be.eq(1)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          agentReturn[1].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          agentReturn[2].toNumber().should.be.eq(1)
+        })
       })
 
-      it('should allow the transfer agent to transfer tokens', async () => {
-        let transferCalldata = await tokenUtil.transfer.call(
-          crowdsaleAdmin, 50, otherContext
-        ).should.be.fulfilled
-        transferCalldata.should.not.eq('0x')
+      describe('events', async () => {
 
-        let events = await storage.exec(
-          tokenTransfer.address, executionID, transferCalldata,
-          { from: exec }
-        ).then((tx) => {
-          return tx.logs
+        it('should have emitted 2 events total', async () => {
+          agentEvents.length.should.be.eq(2)
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(1)
-        events[0].event.should.be.eq('ApplicationExecution')
 
-        let balanceInfo = await initCrowdsale.balanceOf.call(
-          storage.address, executionID, crowdsaleAdmin
-        ).should.be.fulfilled
-        balanceInfo.toNumber().should.be.eq(50 + (totalSupply - sellCap))
+        describe('the ApplicationExecution event', async () => {
 
-        balanceInfo = await initCrowdsale.balanceOf.call(
-          storage.address, executionID, otherAddress
-        ).should.be.fulfilled
-        balanceInfo.toNumber().should.be.eq(50)
+          let eventTopics
+          let eventData
+
+          beforeEach(async () => {
+            eventTopics = agentEvents[1].topics
+            eventData = agentEvents[1].data
+          })
+
+          it('should have the correct number of topics', async () => {
+            eventTopics.length.should.be.eq(3)
+          })
+
+          it('should list the correct event signature in the first topic', async () => {
+            let sig = eventTopics[0]
+            web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+          })
+
+          it('should have the target app address and execution id as the other 2 topics', async () => {
+            let emittedAddr = eventTopics[2]
+            let emittedExecId = eventTopics[1]
+            web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(tokenConsole.address))
+            web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+          })
+
+          it('should have an empty data field', async () => {
+            eventData.should.be.eq('0x0')
+          })
+        })
+
+        describe('the other event', async () => {
+
+          let eventTopics
+          let eventData
+
+          beforeEach(async () => {
+            eventTopics = agentEvents[0].topics
+            eventData = agentEvents[0].data
+          })
+
+          it('should have the correct number of topics', async () => {
+            eventTopics.length.should.be.eq(3)
+          })
+
+          it('should match the correct event signature for the first topic', async () => {
+            let sig = eventTopics[0]
+            web3.toDecimal(sig).should.be.eq(web3.toDecimal(transferAgentHash))
+          })
+
+          it('should match the agent and execution id for the other two topics', async () => {
+            web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+            web3.toDecimal(eventTopics[2]).should.be.eq(web3.toDecimal(otherAddress))
+          })
+
+          it('should contain the set status as data', async () => {
+            web3.toDecimal(eventData).should.be.eq(1)
+          })
+        })
+      })
+
+      describe('storage', async () => {
+
+        it('should accurately record the transfer agent\'s status', async () => {
+          let agentInfo = await initCrowdsale.getTransferAgentStatus.call(
+            storage.address, executionID, otherAddress
+          ).should.be.fulfilled
+          agentInfo.should.be.eq(true)
+        })
+
+        it('should allow the transfer agent to transfer tokens', async () => {
+          let transferCalldata = await tokenUtil.transfer.call(
+            crowdsaleAdmin, 50, otherContext
+          ).should.be.fulfilled
+          transferCalldata.should.not.eq('0x')
+
+          let events = await storage.exec(
+            tokenTransfer.address, executionID, transferCalldata,
+            { from: exec }
+          ).then((tx) => {
+            return tx.logs
+          })
+          events.should.not.eq(null)
+          events.length.should.be.eq(1)
+          events[0].event.should.be.eq('ApplicationExecution')
+
+          let balanceInfo = await initCrowdsale.balanceOf.call(
+            storage.address, executionID, crowdsaleAdmin
+          ).should.be.fulfilled
+          balanceInfo.toNumber().should.be.eq(50 + (totalSupply - sellCap))
+
+          balanceInfo = await initCrowdsale.balanceOf.call(
+            storage.address, executionID, otherAddress
+          ).should.be.fulfilled
+          balanceInfo.toNumber().should.be.eq(50)
+        })
       })
     })
 
@@ -278,12 +389,18 @@ contract('#TokenConsole', function (accounts) {
 
       let invalidCalldata
       let invalidEvent
+      let invalidReturn
 
       beforeEach(async () => {
         invalidCalldata = await consoleUtils.setTransferAgentStatus.call(
           otherAddress, true, otherContext
         ).should.be.fulfilled
         invalidCalldata.should.not.eq('0x')
+
+        invalidReturn = await storage.exec.call(
+          tokenConsole.address, executionID, invalidCalldata,
+          { from: exec }
+        ).should.be.fulfilled
 
         let events = await storage.exec(
           tokenConsole.address, executionID, invalidCalldata,
@@ -293,8 +410,26 @@ contract('#TokenConsole', function (accounts) {
         })
         events.should.not.eq(null)
         events.length.should.be.eq(1)
-
         invalidEvent = events[0]
+      })
+
+      describe('returned data', async () => {
+
+        it('should return a tuple with 3 fields', async () => {
+          invalidReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          invalidReturn[0].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          invalidReturn[1].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          invalidReturn[2].toNumber().should.be.eq(0)
+        })
       })
 
       it('should emit an ApplicationException event', async () => {
@@ -308,7 +443,7 @@ contract('#TokenConsole', function (accounts) {
           emittedExecID.should.be.eq(executionID)
         })
 
-        it('should match the TokenConsole address', async () => {
+        it('should match the TokenTransfer address', async () => {
           let emittedAppAddr = invalidEvent.args['application_address']
           emittedAppAddr.should.be.eq(tokenConsole.address)
         })
@@ -319,11 +454,14 @@ contract('#TokenConsole', function (accounts) {
         })
       })
 
-      it('should not record the passed in address as a transfer agent', async () => {
-        let agentInfo = await initCrowdsale.getTransferAgentStatus.call(
-          storage.address, executionID, otherAddress
-        ).should.be.fulfilled
-        agentInfo.should.not.eq(true)
+      describe('storage', async () => {
+
+        it('should not record the passed in address as a transfer agent', async () => {
+          let agentInfo = await initCrowdsale.getTransferAgentStatus.call(
+            storage.address, executionID, otherAddress
+          ).should.be.fulfilled
+          agentInfo.should.not.eq(true)
+        })
       })
     })
   })

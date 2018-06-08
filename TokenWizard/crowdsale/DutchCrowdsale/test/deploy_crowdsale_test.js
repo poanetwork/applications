@@ -1,6 +1,6 @@
 // Script exec and storage contracts
 let ScriptExec = artifacts.require('./ScriptExec')
-let AbstractStorage = artifacts.require('./RegistryStorage')
+let AbstractStorage = artifacts.require('./AbstractStorage')
 // Script registry
 let InitRegistry = artifacts.require('./InitRegistry')
 let AppConsole = artifacts.require('./AppConsole')
@@ -64,6 +64,14 @@ contract('DutchCrowdsale', function (accounts) {
   let verName = 'v0.0.1'
   let verDesc = 'Initial version'
 
+  // Event signatures
+  let initHash = web3.sha3('ApplicationInitialized(bytes32,address,address,address)')
+  let finalHash = web3.sha3('ApplicationFinalization(bytes32,address)')
+  let execHash = web3.sha3('ApplicationExecution(bytes32,address)')
+  let payHash = web3.sha3('DeliveredPayment(bytes32,address,uint256)')
+
+  let transferHash = web3.sha3('Transfer(address,address,uint256)')
+  let approvalHash = web3.sha3('Approval(address,address,uint256)')
 
   before(async () => {
     storage = await AbstractStorage.new().should.be.fulfilled
@@ -100,16 +108,16 @@ contract('DutchCrowdsale', function (accounts) {
     registryExecID.should.be.eq(events[1].args['execution_id'])
     web3.toDecimal(registryExecID).should.not.eq(0)
 
-    updaterContext = await registryUtils.getContext(
+    updaterContext = await registryUtils.getContext.call(
       registryExecID, updater, 0
     ).should.be.fulfilled
     updaterContext.should.not.eq('0x')
 
-    updaterID = await registryUtils.getProviderHash(updater).should.be.fulfilled
+    updaterID = await registryUtils.getProviderHash.call(updater).should.be.fulfilled
     web3.toDecimal(updaterID).should.not.eq(0)
 
     exec = await ScriptExec.new(
-      updater, storage.address, updaterID,
+      execAdmin, updater, storage.address, updaterID,
       { from: execAdmin }
     ).should.be.fulfilled
     await exec.changeRegistryExecId(registryExecID, { from: execAdmin }).should.be.fulfilled
@@ -117,11 +125,11 @@ contract('DutchCrowdsale', function (accounts) {
   })
 
   it('should correctly set up script exec', async () => {
-    let storedAdmin = await exec.exec_admin().should.be.fulfilled
-    let defaultStorage = await exec.default_storage().should.be.fulfilled
-    let defaultUpdater = await exec.default_updater().should.be.fulfilled
-    let defaultRegistryExecID = await exec.default_registry_exec_id().should.be.fulfilled
-    let defaultProvider = await exec.default_provider().should.be.fulfilled
+    let storedAdmin = await exec.exec_admin.call().should.be.fulfilled
+    let defaultStorage = await exec.default_storage.call().should.be.fulfilled
+    let defaultUpdater = await exec.default_updater.call().should.be.fulfilled
+    let defaultRegistryExecID = await exec.default_registry_exec_id.call().should.be.fulfilled
+    let defaultProvider = await exec.default_provider.call().should.be.fulfilled
 
     storedAdmin.should.be.eq(execAdmin)
     defaultStorage.should.be.eq(storage.address)
@@ -138,17 +146,17 @@ contract('DutchCrowdsale', function (accounts) {
     let finalizeVersionCalldata
 
     before(async () => {
-      registerAppCalldata = await registryUtils.registerApp(
+      registerAppCalldata = await registryUtils.registerApp.call(
         appName, storage.address, appDesc, updaterContext
       ).should.be.fulfilled
       registerAppCalldata.should.not.eq('0x')
 
-      registerVersionCalldata = await registryUtils.registerVersion(
+      registerVersionCalldata = await registryUtils.registerVersion.call(
         appName, verName, storage.address, verDesc, updaterContext
       ).should.be.fulfilled
       registerVersionCalldata.should.not.eq('0x')
 
-      addFunctionsCalldata = await registryUtils.addFunctions(
+      addFunctionsCalldata = await registryUtils.addFunctions.call(
         appName, verName,
         ['0xaaaaaaaa', '0xbbbbbbbb','0xcccccccc','0xdddddddd', '0xeeeeeeee', '0xffffffff'],
         [crowdsaleBuy.address, crowdsaleConsole.address, tokenConsole.address,
@@ -157,7 +165,7 @@ contract('DutchCrowdsale', function (accounts) {
       ).should.be.fulfilled
       addFunctionsCalldata.should.not.eq('0x')
 
-      finalizeVersionCalldata = await registryUtils.finalizeVersion(
+      finalizeVersionCalldata = await registryUtils.finalizeVersion.call(
         appName, verName, initCrowdsale.address, initCrowdsaleSelector,
         initCrowdsaleDesc, updaterContext
       ).should.be.fulfilled
@@ -242,7 +250,7 @@ contract('DutchCrowdsale', function (accounts) {
       let appLatest
 
       beforeEach(async () => {
-        appLatest = await initRegistry.getAppLatestInfo(
+        appLatest = await initRegistry.getAppLatestInfo.call(
           storage.address, registryExecID, updaterID, appName
         ).should.be.fulfilled
         appLatest.length.should.be.eq(4)
@@ -276,7 +284,7 @@ contract('DutchCrowdsale', function (accounts) {
       let versionImpl
 
       beforeEach(async () => {
-        versionImpl = await initRegistry.getVersionImplementation(
+        versionImpl = await initRegistry.getVersionImplementation.call(
           storage.address, registryExecID, updaterID, appName, verName
         ).should.be.fulfilled
         versionImpl.length.should.be.eq(2)
@@ -316,7 +324,7 @@ contract('DutchCrowdsale', function (accounts) {
       beforeEach(async () => {
         startTime = getTime() + 3600
 
-        initCrowdsaleCalldata = await registryUtils.init(
+        initCrowdsaleCalldata = await registryUtils.init.call(
           teamWallet, totalSupply, sellAmount, startRate,
           endRate, duration, startTime, isWhitelisted, admin
         ).should.be.fulfilled

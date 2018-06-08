@@ -1,5 +1,5 @@
 // Abstract storage contract
-let AbstractStorage = artifacts.require('./RegistryStorage')
+let AbstractStorage = artifacts.require('./AbstractStorage')
 // DutchCrowdsale
 let InitDutch = artifacts.require('./InitCrowdsale')
 let DutchCrowdsaleConsole = artifacts.require('./CrowdsaleConsole')
@@ -12,7 +12,6 @@ let TestUtils = artifacts.require('./TestUtils')
 let TokenConsoleUtils = artifacts.require('./TokenConsoleUtils')
 let CrowdsaleConsoleUtils = artifacts.require('./CrowdsaleConsoleUtils')
 let BuyTokensUtil = artifacts.require('./BuyTokensUtil')
-let ViewBalance = artifacts.require('./ViewBalance')
 // Mock
 let CrowdsaleBuyTokensMock = artifacts.require('./CrowdsaleBuyTokensMock')
 let AdminMockContract = artifacts.require('./MockAdminContract')
@@ -31,18 +30,8 @@ function hexStrEquals(hex, expected) {
   return web3.toAscii(hex).substring(0, expected.length) == expected;
 }
 
-function sendBalanceTo(_from, _to) {
-  let bal = web3.eth.getBalance(_from).toNumber()
-  web3.eth.sendTransaction({ from: _from, to: _to, value: bal, gasPrice: 0 })
-}
-
 function deepToNumber(num) {
   return web3.toBigNumber(num).toNumber()
-}
-
-async function getBalance(contract, owner) {
-  let bal = await contract.viewOwnerBalance.call(owner).should.be.fulfilled
-  return bal.toNumber()
 }
 
 contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
@@ -53,7 +42,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
   let tokenConsoleUtil
   let buyTokensUtil
   let crowdsaleConsoleUtil
-  let viewBalance
 
   let exec = accounts[0]
   let updater = accounts[1]
@@ -92,13 +80,21 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
     accounts[accounts.length - 3]
   ]
 
+  // Event signatures
+  let initHash = web3.sha3('ApplicationInitialized(bytes32,address,address,address)')
+  let finalHash = web3.sha3('ApplicationFinalization(bytes32,address)')
+  let execHash = web3.sha3('ApplicationExecution(bytes32,address)')
+  let payHash = web3.sha3('DeliveredPayment(bytes32,address,uint256)')
+  let exceptHash = web3.sha3('ApplicationException(address,bytes32,bytes)')
+
+  let purchaseHash = web3.sha3('Purchase(bytes32,uint256,uint256,uint256)')
+
   before(async () => {
 
     storage = await AbstractStorage.new().should.be.fulfilled
     testUtils = await TestUtils.new().should.be.fulfilled
     tokenConsoleUtil = await TokenConsoleUtils.new().should.be.fulfilled
     buyTokensUtil = await BuyTokensUtil.new().should.be.fulfilled
-    viewBalance = await ViewBalance.new().should.be.fulfilled
 
     crowdsaleConsoleUtil = await CrowdsaleConsoleUtils.new().should.be.fulfilled
     adminMock = await AdminMockContract.new().should.be.fulfilled
@@ -110,21 +106,10 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
     tokenTransfer = await DutchTokenTransfer.new().should.be.fulfilled
     tokenTransferFrom = await DutchTokenTransferFrom.new().should.be.fulfilled
     tokenApprove = await DutchTokenApprove.new().should.be.fulfilled
-
-    // Transfer funds from teamWallet to exec
-    sendBalanceTo(teamWallet, exec)
-    let bal = await getBalance(viewBalance, teamWallet)
-    bal.should.be.eq(0)
   })
 
   beforeEach(async () => {
-    // Transfer funds from teamWallet to exec
-    sendBalanceTo(teamWallet, exec)
-    let bal = await getBalance(viewBalance, teamWallet)
-    bal.should.be.eq(0)
-
     startTime = getTime() + 3600
-    execInitBalance = await getBalance(viewBalance, exec)
 
     initCalldata = await testUtils.init.call(
       teamWallet, totalSupply, sellCap, startPrice, endPrice,
@@ -207,6 +192,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let invalidContext
 
@@ -236,6 +222,11 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       events.length.should.be.eq(1)
       events[0].event.should.be.eq('ApplicationExecution')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec }
+      ).should.be.fulfilled
+
       events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
         { from: exec }
@@ -245,6 +236,25 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -269,7 +279,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should be an initialized crowdsale', async () => {
         let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -295,11 +305,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(tokenDecimals)
         tokenInfo[3].toNumber().should.be.eq(totalSupply)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = await getBalance(viewBalance, teamWallet)
-        curTeamBalance.should.be.eq(0)
-      })
     })
   })
 
@@ -307,6 +312,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = startPrice // Send enough for at least one token
 
@@ -326,6 +332,11 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       ).should.be.fulfilled
       invalidCalldata.should.not.eq('0x')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec, value: valueSent }
+      ).should.be.fulfilled
+
       let events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
         { from: exec, value: valueSent }
@@ -335,6 +346,25 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -359,7 +389,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should have an uninitialized crowdsale', async () => {
         let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -385,11 +415,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(tokenDecimals)
         tokenInfo[3].toNumber().should.be.eq(totalSupply)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = await getBalance(viewBalance, teamWallet)
-        curTeamBalance.should.be.eq(0)
-      })
     })
   })
 
@@ -397,6 +422,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = startPrice // Send enough for at least one token
 
@@ -446,6 +472,11 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       events.length.should.be.eq(1)
       events[0].event.should.be.eq('ApplicationExecution')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec, value: valueSent }
+      ).should.be.fulfilled
+
       events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
         { from: exec, value: valueSent }
@@ -455,6 +486,25 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -479,7 +529,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should have an initialized and finalized crowdsale', async () => {
         let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -505,11 +555,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(tokenDecimals)
         tokenInfo[3].toNumber().should.be.eq(totalSupply)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = await getBalance(viewBalance, teamWallet)
-        curTeamBalance.should.be.eq(0)
-      })
     })
   })
 
@@ -517,6 +562,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = startPrice // Send enough for at least one token
 
@@ -532,6 +578,11 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       ).should.be.fulfilled
       invalidCalldata.should.not.eq('0x')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec, value: valueSent }
+      ).should.be.fulfilled
+
       let events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
         { from: exec, value: valueSent }
@@ -541,6 +592,25 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -565,7 +635,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should have an uninitialized crowdsale', async () => {
         let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -591,11 +661,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(tokenDecimals)
         tokenInfo[3].toNumber().should.be.eq(totalSupply)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = await getBalance(viewBalance, teamWallet)
-        curTeamBalance.should.be.eq(0)
-      })
     })
   })
 
@@ -603,11 +668,11 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = startPrice // Send enough for at least one token
 
     beforeEach(async () => {
-
       // Fast-forward to time after crowdsale end
       await crowdsaleBuyMock.setTime(startTime + duration).should.be.fulfilled
       let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -638,6 +703,11 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       events.length.should.be.eq(1)
       events[0].event.should.be.eq('ApplicationExecution')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec }
+      ).should.be.fulfilled
+
       events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
         { from: exec }
@@ -647,6 +717,25 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -671,7 +760,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should have an initialized crowdsale', async () => {
         let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -697,11 +786,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(tokenDecimals)
         tokenInfo[3].toNumber().should.be.eq(totalSupply)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = await getBalance(viewBalance, teamWallet)
-        curTeamBalance.should.be.eq(0)
-      })
     })
   })
 
@@ -709,6 +793,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = startPrice // Send enough for at least one token
 
@@ -756,15 +841,39 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       events.length.should.be.eq(1)
       events[0].event.should.be.eq('ApplicationExecution')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec, value: valueSent }
+      ).should.be.fulfilled
+
       events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
-        { from: exec }
+        { from: exec, value: valueSent }
       ).then((tx) => {
         return tx.logs
       })
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -789,7 +898,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should have an initialized crowdsale', async () => {
         let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -824,11 +933,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
         isFullInfo[0].should.be.eq(true)
         isFullInfo[1].toNumber().should.be.eq(sellCap)
-      })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = await getBalance(viewBalance, teamWallet)
-        curTeamBalance.should.be.eq(0)
       })
     })
   })
@@ -875,6 +979,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
       let invalidCalldata
       let invalidEvent
+      let invalidReturn
 
       let valueSent = startPrice
 
@@ -889,6 +994,11 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
         ).should.be.fulfilled
         invalidCalldata.should.not.eq('0x')
 
+        invalidReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, invalidCalldata,
+          { from: exec, value: valueSent }
+        ).should.be.fulfilled
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, invalidCalldata,
           { from: exec, value: valueSent }
@@ -898,6 +1008,25 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
         events.should.not.eq(null)
         events.length.should.be.eq(1)
         invalidEvent = events[0]
+      })
+
+      describe('returned data', async () => {
+
+        it('should return a tuple with 3 fields', async () => {
+          invalidReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          invalidReturn[0].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          invalidReturn[1].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          invalidReturn[2].toNumber().should.be.eq(0)
+        })
       })
 
       it('should emit an ApplicationException event', async () => {
@@ -922,7 +1051,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
         })
       })
 
-      describe('the resulting crowdsale storage', async () => {
+      describe('storage', async () => {
 
         it('should have an initialized crowdsale', async () => {
           let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -947,11 +1076,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
           hexStrEquals(tokenInfo[1], tokenSymbol).should.be.eq(true)
           tokenInfo[2].toNumber().should.be.eq(tokenDecimals)
           tokenInfo[3].toNumber().should.be.eq(totalSupply)
-        })
-
-        it('should have an unchanged team wallet balance', async () => {
-          let curTeamBalance = await getBalance(viewBalance, teamWallet)
-          curTeamBalance.should.be.eq(0)
         })
       })
     })
@@ -1057,11 +1181,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
           crowdsaleInfo.length.should.be.eq(5)
           crowdsaleInfo[0].toNumber().should.be.eq(0)
         })
-
-        it('should have the correct value for the team\'s current balance', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(0)
-        })
       })
 
       context('multiple consecutive spends', async () => {
@@ -1074,17 +1193,15 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
         let purchaseContexts
         let paymentEvents
+        let paymentReturns
+
         let spendCalldataList
 
         beforeEach(async () => {
           purchaseContexts = []
           paymentEvents = []
+          paymentReturns = []
           spendCalldataList = []
-
-          // Transfer funds from teamWallet to exec
-          sendBalanceTo(teamWallet, exec)
-          let bal = await getBalance(viewBalance, teamWallet)
-          bal.should.be.eq(0)
 
           purchaseContexts.push(
             await testUtils.getContext.call(
@@ -1102,9 +1219,9 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
             ).should.be.fulfilled
           )
           purchaseContexts.length.should.be.eq(3)
-          purchaseContexts[0].should.not.eq('0x')
-          purchaseContexts[1].should.not.eq('0x')
-          purchaseContexts[2].should.not.eq('0x')
+          purchaseContexts[0].should.not.eq('0x0')
+          purchaseContexts[1].should.not.eq('0x0')
+          purchaseContexts[2].should.not.eq('0x0')
 
           spendCalldataList.push(
             await buyTokensUtil.buy.call(purchaseContexts[0]).should.be.fulfilled
@@ -1115,94 +1232,386 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
           spendCalldataList.push(
             await buyTokensUtil.buy.call(purchaseContexts[2]).should.be.fulfilled
           )
-          spendCalldataList[0].should.not.eq('0x')
-          spendCalldataList[1].should.not.eq('0x')
-          spendCalldataList[2].should.not.eq('0x')
+          spendCalldataList[0].should.not.eq('0x0')
+          spendCalldataList[1].should.not.eq('0x0')
+          spendCalldataList[2].should.not.eq('0x0')
+
+          let returnValues = await storage.exec.call(
+            crowdsaleBuyMock.address, executionID, spendCalldataList[0],
+            { from: exec, value: initialSpends[0] }
+          ).should.be.fulfilled
+          paymentReturns.push(returnValues)
 
           let events = await storage.exec(
             crowdsaleBuyMock.address, executionID, spendCalldataList[0],
             { from: exec, value: initialSpends[0] }
           ).then((tx) => {
-            return tx.logs
+            return tx.receipt.logs
           })
-          events.should.not.eq(null)
-          events.length.should.be.eq(2)
-          paymentEvents.push(events[0])
-          events[1].event.should.be.eq('ApplicationExecution')
+          paymentEvents.push(events)
+
+          returnValues = await storage.exec.call(
+            crowdsaleBuyMock.address, executionID, spendCalldataList[1],
+            { from: exec, value: initialSpends[1] }
+          ).should.be.fulfilled
+          paymentReturns.push(returnValues)
 
           events = await storage.exec(
             crowdsaleBuyMock.address, executionID, spendCalldataList[1],
             { from: exec, value: initialSpends[1] }
           ).then((tx) => {
-            return tx.logs
+            return tx.receipt.logs
           })
-          events.should.not.eq(null)
-          events.length.should.be.eq(2)
-          paymentEvents.push(events[0])
-          events[1].event.should.be.eq('ApplicationExecution')
+          paymentEvents.push(events)
+
+          returnValues = await storage.exec.call(
+            crowdsaleBuyMock.address, executionID, spendCalldataList[2],
+            { from: exec, value: initialSpends[2] }
+          ).should.be.fulfilled
+          paymentReturns.push(returnValues)
 
           events = await storage.exec(
             crowdsaleBuyMock.address, executionID, spendCalldataList[2],
             { from: exec, value: initialSpends[2] }
           ).then((tx) => {
-            return tx.logs
+            return tx.receipt.logs
           })
-          events.should.not.eq(null)
-          events.length.should.be.eq(1) // Final call will fail, as the sender's maximum is too restrictive
-          paymentEvents.push(events[0])
+          paymentEvents.push(events)
 
           paymentEvents.length.should.be.eq(3)
+          paymentReturns.length.should.be.eq(3)
         })
 
-        describe('payment results', async () => {
+        describe('returned data', async () => {
 
-          it('should emit 2 DeliveredPayment events, and 1 ApplicationException event', async () => {
-            paymentEvents[0].event.should.be.eq('DeliveredPayment')
-            paymentEvents[1].event.should.be.eq('DeliveredPayment')
-            paymentEvents[2].event.should.be.eq('ApplicationException')
-          })
+          let returnedData
 
-          describe('the DeliveredPayment events', async () => {
+          describe('payment (#1)', async () => {
 
-            it('should match the execution ID', async () => {
-              let emittedExecID = paymentEvents[0].args['execution_id']
-              emittedExecID.should.be.eq(executionID)
-              emittedExecID = paymentEvents[1].args['execution_id']
-              emittedExecID.should.be.eq(executionID)
+            beforeEach(async () => {
+              returnedData = paymentReturns[0]
             })
 
-            it('should match the team wallet destination address', async () => {
-              let destination = paymentEvents[0].args['destination']
-              destination.should.be.eq(teamWallet)
-              destination = paymentEvents[1].args['destination']
-              destination.should.be.eq(teamWallet)
+            it('should return a tuple with 3 fields', async () => {
+              returnedData.length.should.be.eq(3)
             })
 
-            it('should match the initial spend amounts', async () => {
-              let sent = paymentEvents[0].args['amount']
-              sent.toNumber().should.be.eq(initialSpends[0])
-              sent = paymentEvents[1].args['amount']
-              sent.toNumber().should.be.eq(initialSpends[1])
+            it('should return the correct number of events emitted', async () => {
+              returnedData[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              returnedData[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              returnedData[2].toNumber().should.be.eq(7)
             })
           })
 
-          describe('the ApplicationException event', async () => {
+          describe('payment (#2)', async () => {
 
-            it('should match the execution ID', async () => {
-              let emittedExecID = paymentEvents[2].args['execution_id']
-              emittedExecID.should.be.eq(executionID)
+            beforeEach(async () => {
+              returnedData = paymentReturns[1]
             })
 
-            it('should match the CrowdsaleBuyTokensMock address', async () => {
-              let emittedAddr = paymentEvents[2].args['application_address']
-              emittedAddr.should.be.eq(crowdsaleBuyMock.address)
+            it('should return a tuple with 3 fields', async () => {
+              returnedData.length.should.be.eq(3)
             })
 
-            it('should contain the error message \'UnderMinCap\'', async () => {
-              let message = paymentEvents[2].args['message']
-              hexStrEquals(message, 'UnderMinCap').should.be.eq(true)
+            it('should return the correct number of events emitted', async () => {
+              returnedData[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              returnedData[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              returnedData[2].toNumber().should.be.eq(7)
             })
           })
+
+          describe('payment (#3 - failed payment)', async () => {
+
+            beforeEach(async () => {
+              returnedData = paymentReturns[2]
+            })
+
+            it('should return a tuple with 3 fields', async () => {
+              returnedData.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              returnedData[0].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              returnedData[1].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              returnedData[2].toNumber().should.be.eq(0)
+            })
+          })
+        })
+
+        describe('events', async () => {
+
+          let emittedEvents
+
+          describe('event (#1)', async () => {
+
+            beforeEach(async () => {
+              emittedEvents = paymentEvents[0]
+            })
+
+            it('should emit a total of 3 events', async () => {
+              emittedEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[2].topics
+                eventData = emittedEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+
+            describe('the DeliveredPayment event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[0].topics
+                eventData = emittedEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(initialSpends[0])
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[1].topics
+                eventData = emittedEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(startPrice)
+                web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(purchaserMinimums[0])
+              })
+            })
+          })
+
+          describe('event (#2)', async () => {
+
+            beforeEach(async () => {
+              emittedEvents = paymentEvents[1]
+            })
+
+            it('should emit a total of 3 events', async () => {
+              emittedEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[2].topics
+                eventData = emittedEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+
+            describe('the DeliveredPayment event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[0].topics
+                eventData = emittedEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(initialSpends[1])
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[1].topics
+                eventData = emittedEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(startPrice)
+                web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(purchaserMinimums[1])
+              })
+            })
+          })
+
+          describe('event (#3 - failed payment)', async () => {
+
+            beforeEach(async () => {
+              emittedEvents = paymentEvents[2]
+            })
+
+            it('should emit a total of 1 event', async () => {
+              emittedEvents.length.should.be.eq(1)
+            })
+
+            describe('the ApplicationException event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[0].topics
+                eventData = emittedEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(exceptHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[1]
+                let emittedExecId = eventTopics[2]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have data matching \'UnderMinCap\'', async () => {
+                eventData.length.should.be.eq(194)
+                let message = eventData.substring(130, 194)
+                hexStrEquals(message, 'UnderMinCap').should.be.eq(true)
+              })
+            })
+          })
+        })
+
+        describe('storage', async () => {
 
           it('should have the correct amount of wei raised', async () => {
             let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -1243,13 +1652,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
               ).should.be.fulfilled
               balanceInfo.toNumber().should.be.eq(0)
             })
-          })
-
-          it('should have sent the wei to the team wallet', async () => {
-            let teamBalance = await getBalance(viewBalance, teamWallet)
-            teamBalance.should.be.eq(
-              initialSpends[0] + initialSpends[1]
-            )
           })
 
           describe('whitelist information', async () => {
@@ -1335,10 +1737,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
           beforeEach(async () => {
             newSendAmount = startPrice
-            // Transfer funds from teamWallet to exec
-            sendBalanceTo(teamWallet, exec)
-            let bal = await getBalance(viewBalance, teamWallet)
-            bal.should.be.eq(0)
 
             let purchaseContext = await testUtils.getContext.call(
               executionID, purchaserList[0], newSendAmount
@@ -1371,13 +1769,10 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
           let maxSpendAmount
 
           let newSpendAmount
-          let newSpendEvent
+          let newSpendEvents
+          let newSpendReturn
 
           beforeEach(async () => {
-            // Transfer funds from teamWallet to exec
-            sendBalanceTo(teamWallet, exec)
-            let bal = await getBalance(viewBalance, teamWallet)
-            bal.should.be.eq(0)
 
             newSpendAmount = startPrice + (purchaserMaximums[0] - initialSpends[0])
             maxSpendAmount = (purchaserMaximums[0] - initialSpends[0])
@@ -1392,41 +1787,138 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
             ).should.be.fulfilled
             purchaseCalldata.should.not.eq('0x')
 
-            let events = await storage.exec(
+            newSpendReturn = await storage.exec.call(
+              crowdsaleBuyMock.address, executionID, purchaseCalldata,
+              { from: exec, value: newSpendAmount }
+            ).should.be.fulfilled
+
+            newSpendEvents = await storage.exec(
               crowdsaleBuyMock.address, executionID, purchaseCalldata,
               { from: exec, value: newSpendAmount }
             ).then((tx) => {
-              return tx.logs
+              return tx.receipt.logs
             })
-            events.should.not.eq(null)
-            events.length.should.be.eq(2)
-            newSpendEvent = events[0]
-            events[1].event.should.be.eq('ApplicationExecution')
           })
 
-          describe('payment results', async () => {
+          describe('returned data', async () => {
 
-            it('should emit a DeliveredPayment event', async () => {
-              newSpendEvent.event.should.be.eq('DeliveredPayment')
+            it('should return a tuple with 3 fields', async () => {
+              newSpendReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              newSpendReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              newSpendReturn[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              newSpendReturn[2].toNumber().should.be.eq(5)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should emit a total of 3 events', async () => {
+              newSpendEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = newSpendEvents[2].topics
+                eventData = newSpendEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
             })
 
             describe('the DeliveredPayment event', async () => {
 
-              it('should match the execution ID', async () => {
-                let emittedExecID = newSpendEvent.args['execution_id']
-                emittedExecID.should.be.eq(executionID)
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = newSpendEvents[0].topics
+                eventData = newSpendEvents[0].data
               })
 
-              it('should match the team wallet destination address', async () => {
-                let destination = newSpendEvent.args['destination']
-                destination.should.be.eq(teamWallet)
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
               })
 
-              it('should match the max spend amount', async () => {
-                let sent = newSpendEvent.args['amount']
-                sent.toNumber().should.be.eq(maxSpendAmount)
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(maxSpendAmount)
               })
             })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = newSpendEvents[1].topics
+                eventData = newSpendEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(startPrice)
+                web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(maxSpendAmount / startPrice)
+              })
+            })
+          })
+
+          describe('storage', async () => {
 
             it('should have the correct amount of wei raised', async () => {
               let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -1469,11 +1961,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
                 ).should.be.fulfilled
                 balanceInfo.toNumber().should.be.eq(0)
               })
-            })
-
-            it('should have sent the wei to the team wallet', async () => {
-              let teamBalance = await getBalance(viewBalance, teamWallet)
-              teamBalance.should.be.eq(maxSpendAmount)
             })
 
             describe('whitelist information', async () => {
@@ -1578,11 +2065,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
           validPurchaseAmount = purchaserMaximums[2]
           validPurchaseTime = startTime + (0.9 * duration)
-
-          // Transfer funds from teamWallet to exec
-          sendBalanceTo(teamWallet, exec)
-          let bal = await getBalance(viewBalance, teamWallet)
-          bal.should.be.eq(0)
 
           let invalidContext = await testUtils.getContext.call(
             executionID, purchaserList[2], invalidPurchaseAmount
@@ -1693,19 +2175,19 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
     context('global minimum exists', async () => {
 
-      let initialPurchaseEvent
-      let nextPurchaseEvent
+      let initialPurchaseEvents
+      let initialPurchaseReturn
+
+      let nextPurchaseEvents
+      let nextPurchaseReturn
+
       let invalidPurchaseEvent
+      let invalidPurchaseReturn
 
       let globalMin = 10 // 10 token minimum purchase
       let spendAmount = startPrice * globalMin
 
       beforeEach(async () => {
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
-
         let updateMinCalldata = await buyTokensUtil.updateGlobalMin.call(
           globalMin
         ).should.be.fulfilled
@@ -1741,28 +2223,32 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
         events.length.should.be.eq(1)
         events[0].event.should.be.eq('ApplicationExecution')
 
-        events = await storage.exec(
+        initialPurchaseReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: spendAmount }
+        ).should.be.fulfilled
+        initialPurchaseEvents = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: spendAmount }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        initialPurchaseEvent = events[0]
-        events[1].event.should.be.eq('ApplicationExecution')
 
-        events = await storage.exec(
+        nextPurchaseReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: spendAmount }
+        ).should.be.fulfilled
+        nextPurchaseEvents = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: spendAmount }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        nextPurchaseEvent = events[0]
-        events[1].event.should.be.eq('ApplicationExecution')
 
+        invalidPurchaseReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, invalidCalldata,
+          { from: exec, value: spendAmount - 1 }
+        ).should.be.fulfilled
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, invalidCalldata,
           { from: exec, value: spendAmount - 1 }
@@ -1775,6 +2261,25 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
       })
 
       context('sender does not buy at least the global minimum token amount', async () => {
+
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            invalidPurchaseReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            invalidPurchaseReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            invalidPurchaseReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            invalidPurchaseReturn[2].toNumber().should.be.eq(0)
+          })
+        })
 
         it('should emit an ApplicationException event', async () => {
           invalidPurchaseEvent.event.should.be.eq('ApplicationException')
@@ -1798,7 +2303,7 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
           })
         })
 
-        describe('the resulting crowdsale storage', async () => {
+        describe('storage', async () => {
 
           it('should have an initialized crowdsale', async () => {
             let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -1829,29 +2334,125 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
       context('sender has contributed before', async () => {
 
-        describe('payment results', async () => {
+        describe('returned data', async () => {
 
-          it('should emit a DeliveredPayment event', async () => {
-            nextPurchaseEvent.event.should.be.eq('DeliveredPayment')
+          it('should return a tuple with 3 fields', async () => {
+            nextPurchaseReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            nextPurchaseReturn[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            nextPurchaseReturn[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            nextPurchaseReturn[2].toNumber().should.be.eq(3)
+          })
+        })
+
+        describe('events', async () => {
+
+          it('should emit a total of 3 events', async () => {
+            nextPurchaseEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = nextPurchaseEvents[2].topics
+              eventData = nextPurchaseEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
           })
 
           describe('the DeliveredPayment event', async () => {
 
-            it('should match the execution ID', async () => {
-              let emittedExecID = nextPurchaseEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = nextPurchaseEvents[0].topics
+              eventData = nextPurchaseEvents[0].data
             })
 
-            it('should match the team wallet destination address', async () => {
-              let destination = nextPurchaseEvent.args['destination']
-              destination.should.be.eq(teamWallet)
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
             })
 
-            it('should match the amount spent', async () => {
-              let sent = nextPurchaseEvent.args['amount']
-              sent.toNumber().should.be.eq(spendAmount)
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(spendAmount)
             })
           })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = nextPurchaseEvents[1].topics
+              eventData = nextPurchaseEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(startPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(spendAmount / startPrice)
+            })
+          })
+        })
+
+        describe('storage', async () => {
 
           it('should have the correct amount of wei raised', async () => {
             let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -1876,11 +2477,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
               ).should.be.fulfilled
               balanceInfo.toNumber().should.be.eq(globalMin * 2)
             })
-          })
-
-          it('should have sent the wei to the team wallet', async () => {
-            let teamBalance = await getBalance(viewBalance, teamWallet)
-            teamBalance.should.be.eq(spendAmount * 2)
           })
 
           it('should have the same token total supply', async () => {
@@ -1901,29 +2497,125 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
       context('sender has not contributed before', async () => {
 
-        describe('payment results', async () => {
+        describe('returned data', async () => {
 
-          it('should emit a DeliveredPayment event', async () => {
-            initialPurchaseEvent.event.should.be.eq('DeliveredPayment')
+          it('should return a tuple with 3 fields', async () => {
+            initialPurchaseReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            initialPurchaseReturn[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            initialPurchaseReturn[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            initialPurchaseReturn[2].toNumber().should.be.eq(5)
+          })
+        })
+
+        describe('events', async () => {
+
+          it('should emit a total of 3 events', async () => {
+            initialPurchaseEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = initialPurchaseEvents[2].topics
+              eventData = initialPurchaseEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
           })
 
           describe('the DeliveredPayment event', async () => {
 
-            it('should match the execution ID', async () => {
-              let emittedExecID = initialPurchaseEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = initialPurchaseEvents[0].topics
+              eventData = initialPurchaseEvents[0].data
             })
 
-            it('should match the team wallet destination address', async () => {
-              let destination = initialPurchaseEvent.args['destination']
-              destination.should.be.eq(teamWallet)
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
             })
 
-            it('should match the amount spent', async () => {
-              let sent = initialPurchaseEvent.args['amount']
-              sent.toNumber().should.be.eq(spendAmount)
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(spendAmount)
             })
           })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = initialPurchaseEvents[1].topics
+              eventData = initialPurchaseEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(startPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(spendAmount / startPrice)
+            })
+          })
+        })
+
+        describe('storage', async () => {
 
           it('should have the correct amount of wei raised', async () => {
             let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -1948,11 +2640,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
               ).should.be.fulfilled
               balanceInfo.toNumber().should.be.eq(globalMin * 2)
             })
-          })
-
-          it('should have sent the wei to the team wallet', async () => {
-            let teamBalance = await getBalance(viewBalance, teamWallet)
-            teamBalance.should.be.eq(spendAmount * 2)
           })
 
           it('should have the same token total supply', async () => {
@@ -1976,14 +2663,10 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
 
       let spendAmount
       let purchaseCalldata
-      let purchaseEvent
+      let purchaseEvents
+      let purchaseReturn
 
       beforeEach(async () => {
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
-
         spendAmount = (startPrice * sellCap) + startPrice
 
         let purchaseContext = await testUtils.getContext.call(
@@ -1996,41 +2679,138 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
-        let events = await storage.exec(
+        purchaseReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: spendAmount }
+        ).should.be.fulfilled
+
+        purchaseEvents = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: spendAmount }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        purchaseEvent = events[0]
-        events[1].event.should.be.eq('ApplicationExecution')
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit a DeliveredPayment event', async () => {
-          purchaseEvent.event.should.be.eq('DeliveredPayment')
+        it('should return a tuple with 3 fields', async () => {
+          purchaseReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          purchaseReturn[0].toNumber().should.be.eq(1)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          purchaseReturn[1].toNumber().should.be.eq(1)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          purchaseReturn[2].toNumber().should.be.eq(5)
+        })
+      })
+
+      describe('events', async () => {
+
+        it('should emit a total of 3 events', async () => {
+          purchaseEvents.length.should.be.eq(3)
+        })
+
+        describe('the ApplicationExecution event', async () => {
+
+          let eventTopics
+          let eventData
+
+          beforeEach(async () => {
+            eventTopics = purchaseEvents[2].topics
+            eventData = purchaseEvents[2].data
+          })
+
+          it('should have the correct number of topics', async () => {
+            eventTopics.length.should.be.eq(3)
+          })
+
+          it('should list the correct event signature in the first topic', async () => {
+            let sig = eventTopics[0]
+            web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+          })
+
+          it('should have the target app address and execution id as the other 2 topics', async () => {
+            let emittedAddr = eventTopics[2]
+            let emittedExecId = eventTopics[1]
+            web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+            web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+          })
+
+          it('should have an empty data field', async () => {
+            web3.toDecimal(eventData).should.be.eq(0)
+          })
         })
 
         describe('the DeliveredPayment event', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvent.args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          let eventTopics
+          let eventData
+
+          beforeEach(async () => {
+            eventTopics = purchaseEvents[0].topics
+            eventData = purchaseEvents[0].data
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvent.args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should have the correct number of topics', async () => {
+            eventTopics.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvent.args['amount']
-            sent.toNumber().should.be.eq(spendAmount - startPrice)
+          it('should list the correct event signature in the first topic', async () => {
+            let sig = eventTopics[0]
+            web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+          })
+
+          it('should have the payment destination and execution id as the other 2 topics', async () => {
+            let emittedAddr = eventTopics[2]
+            let emittedExecId = eventTopics[1]
+            web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+            web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+          })
+
+          it('should have a data field containing the amount sent', async () => {
+            web3.toDecimal(eventData).should.be.eq(spendAmount - startPrice)
           })
         })
+
+        describe('the other event', async () => {
+
+          let eventTopics
+          let eventData
+
+          beforeEach(async () => {
+            eventTopics = purchaseEvents[1].topics
+            eventData = purchaseEvents[1].data
+          })
+
+          it('should have the correct number of topics', async () => {
+            eventTopics.length.should.be.eq(4)
+          })
+
+          it('should match the event signature for the first topic', async () => {
+            let sig = eventTopics[0]
+            web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+          })
+
+          it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+            web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+            web3.toDecimal(eventTopics[2]).should.be.eq(startPrice)
+            web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+          })
+
+          it('should contain the number of tokens purchased in the data field', async () => {
+            web3.toDecimal(eventData).should.be.eq((spendAmount - startPrice) / startPrice)
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -2055,11 +2835,6 @@ contract('#DutchBuyTokens - (standard price, 0 decimals)', function (accounts) {
             ).should.be.fulfilled
             balanceInfo.toNumber().should.be.eq(sellCap)
           })
-        })
-
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(spendAmount - startPrice)
         })
 
         it('should have the same token total supply', async () => {
@@ -2087,8 +2862,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
   let testUtils
   let tokenConsoleUtil
   let buyTokensUtil
-  let crowdsaleConsoleUtil
-  let viewBalance
 
   let exec = accounts[0]
   let updater = accounts[1]
@@ -2130,13 +2903,21 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
     accounts[accounts.length - 3]
   ]
 
+  // Event signatures
+  let initHash = web3.sha3('ApplicationInitialized(bytes32,address,address,address)')
+  let finalHash = web3.sha3('ApplicationFinalization(bytes32,address)')
+  let execHash = web3.sha3('ApplicationExecution(bytes32,address)')
+  let payHash = web3.sha3('DeliveredPayment(bytes32,address,uint256)')
+  let exceptHash = web3.sha3('ApplicationException(address,bytes32,bytes)')
+
+  let purchaseHash = web3.sha3('Purchase(bytes32,uint256,uint256,uint256)')
+
   before(async () => {
 
     storage = await AbstractStorage.new().should.be.fulfilled
     testUtils = await TestUtils.new().should.be.fulfilled
     tokenConsoleUtil = await TokenConsoleUtils.new().should.be.fulfilled
     buyTokensUtil = await BuyTokensUtil.new().should.be.fulfilled
-    viewBalance = await ViewBalance.new().should.be.fulfilled
 
     crowdsaleConsoleUtil = await CrowdsaleConsoleUtils.new().should.be.fulfilled
     adminMock = await AdminMockContract.new().should.be.fulfilled
@@ -2148,21 +2929,10 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
     tokenTransfer = await DutchTokenTransfer.new().should.be.fulfilled
     tokenTransferFrom = await DutchTokenTransferFrom.new().should.be.fulfilled
     tokenApprove = await DutchTokenApprove.new().should.be.fulfilled
-
-    // Transfer funds from teamWallet to exec
-    sendBalanceTo(teamWallet, exec)
-    let bal = await getBalance(viewBalance, teamWallet)
-    bal.should.be.eq(0)
   })
 
   beforeEach(async () => {
-    // Transfer funds from teamWallet to exec
-    sendBalanceTo(teamWallet, exec)
-    let bal = await getBalance(viewBalance, teamWallet)
-    bal.should.be.eq(0)
-
     startTime = getTime() + 3600
-    execInitBalance = await getBalance(viewBalance, exec)
 
     initCalldata = await testUtils.init.call(
       teamWallet, totalSupply, sellCap, startPrice, endPrice,
@@ -2245,6 +3015,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let invalidContext
 
@@ -2274,6 +3045,11 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       events.length.should.be.eq(1)
       events[0].event.should.be.eq('ApplicationExecution')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec }
+      ).should.be.fulfilled
+
       events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
         { from: exec }
@@ -2283,6 +3059,25 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -2307,7 +3102,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should be an initialized crowdsale', async () => {
         let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -2333,11 +3128,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(tokenDecimals)
         tokenInfo[3].toNumber().should.be.eq(totalSupply)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = await getBalance(viewBalance, teamWallet)
-        curTeamBalance.should.be.eq(0)
-      })
     })
   })
 
@@ -2345,6 +3135,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = startPrice // Send enough for at least one token
 
@@ -2364,6 +3155,11 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       ).should.be.fulfilled
       invalidCalldata.should.not.eq('0x')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec, value: valueSent }
+      ).should.be.fulfilled
+
       let events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
         { from: exec, value: valueSent }
@@ -2373,6 +3169,25 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -2397,7 +3212,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should have an uninitialized crowdsale', async () => {
         let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -2423,11 +3238,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(tokenDecimals)
         tokenInfo[3].toNumber().should.be.eq(totalSupply)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = await getBalance(viewBalance, teamWallet)
-        curTeamBalance.should.be.eq(0)
-      })
     })
   })
 
@@ -2435,6 +3245,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = startPrice // Send enough for at least one token
 
@@ -2484,6 +3295,11 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       events.length.should.be.eq(1)
       events[0].event.should.be.eq('ApplicationExecution')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec, value: valueSent }
+      ).should.be.fulfilled
+
       events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
         { from: exec, value: valueSent }
@@ -2493,6 +3309,25 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -2517,7 +3352,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should have an initialized and finalized crowdsale', async () => {
         let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -2543,11 +3378,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(tokenDecimals)
         tokenInfo[3].toNumber().should.be.eq(totalSupply)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = await getBalance(viewBalance, teamWallet)
-        curTeamBalance.should.be.eq(0)
-      })
     })
   })
 
@@ -2555,6 +3385,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = startPrice // Send enough for at least one token
 
@@ -2570,6 +3401,11 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       ).should.be.fulfilled
       invalidCalldata.should.not.eq('0x')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec, value: valueSent }
+      ).should.be.fulfilled
+
       let events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
         { from: exec, value: valueSent }
@@ -2579,6 +3415,25 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -2603,7 +3458,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should have an uninitialized crowdsale', async () => {
         let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -2629,11 +3484,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(tokenDecimals)
         tokenInfo[3].toNumber().should.be.eq(totalSupply)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = await getBalance(viewBalance, teamWallet)
-        curTeamBalance.should.be.eq(0)
-      })
     })
   })
 
@@ -2641,11 +3491,11 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = startPrice // Send enough for at least one token
 
     beforeEach(async () => {
-
       // Fast-forward to time after crowdsale end
       await crowdsaleBuyMock.setTime(startTime + duration).should.be.fulfilled
       let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -2676,6 +3526,11 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       events.length.should.be.eq(1)
       events[0].event.should.be.eq('ApplicationExecution')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec }
+      ).should.be.fulfilled
+
       events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
         { from: exec }
@@ -2685,6 +3540,25 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -2709,7 +3583,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should have an initialized crowdsale', async () => {
         let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -2735,11 +3609,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
         tokenInfo[2].toNumber().should.be.eq(tokenDecimals)
         tokenInfo[3].toNumber().should.be.eq(totalSupply)
       })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = await getBalance(viewBalance, teamWallet)
-        curTeamBalance.should.be.eq(0)
-      })
     })
   })
 
@@ -2747,6 +3616,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
     let invalidCalldata
     let invalidEvent
+    let invalidReturn
 
     let valueSent = startPrice // Send enough for at least one token
 
@@ -2794,15 +3664,39 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       events.length.should.be.eq(1)
       events[0].event.should.be.eq('ApplicationExecution')
 
+      invalidReturn = await storage.exec.call(
+        crowdsaleBuyMock.address, executionID, invalidCalldata,
+        { from: exec, value: valueSent }
+      ).should.be.fulfilled
+
       events = await storage.exec(
         crowdsaleBuyMock.address, executionID, invalidCalldata,
-        { from: exec }
+        { from: exec, value: valueSent }
       ).then((tx) => {
         return tx.logs
       })
       events.should.not.eq(null)
       events.length.should.be.eq(1)
       invalidEvent = events[0]
+    })
+
+    describe('returned data', async () => {
+
+      it('should return a tuple with 3 fields', async () => {
+        invalidReturn.length.should.be.eq(3)
+      })
+
+      it('should return the correct number of events emitted', async () => {
+        invalidReturn[0].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of addresses paid', async () => {
+        invalidReturn[1].toNumber().should.be.eq(0)
+      })
+
+      it('should return the correct number of storage slots written to', async () => {
+        invalidReturn[2].toNumber().should.be.eq(0)
+      })
     })
 
     it('should emit an ApplicationException event', async () => {
@@ -2827,7 +3721,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       })
     })
 
-    describe('the resulting crowdsale storage', async () => {
+    describe('storage', async () => {
 
       it('should have an initialized crowdsale', async () => {
         let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -2862,11 +3756,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
         isFullInfo[0].should.be.eq(true)
         isFullInfo[1].toNumber().should.be.eq(sellCap)
-      })
-
-      it('should have an unchanged team wallet balance', async () => {
-        let curTeamBalance = await getBalance(viewBalance, teamWallet)
-        curTeamBalance.should.be.eq(0)
       })
     })
   })
@@ -2913,6 +3802,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
       let invalidCalldata
       let invalidEvent
+      let invalidReturn
 
       let valueSent = startPrice
 
@@ -2927,6 +3817,11 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
         ).should.be.fulfilled
         invalidCalldata.should.not.eq('0x')
 
+        invalidReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, invalidCalldata,
+          { from: exec, value: valueSent }
+        ).should.be.fulfilled
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, invalidCalldata,
           { from: exec, value: valueSent }
@@ -2936,6 +3831,25 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
         events.should.not.eq(null)
         events.length.should.be.eq(1)
         invalidEvent = events[0]
+      })
+
+      describe('returned data', async () => {
+
+        it('should return a tuple with 3 fields', async () => {
+          invalidReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          invalidReturn[0].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          invalidReturn[1].toNumber().should.be.eq(0)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          invalidReturn[2].toNumber().should.be.eq(0)
+        })
       })
 
       it('should emit an ApplicationException event', async () => {
@@ -2960,7 +3874,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
         })
       })
 
-      describe('the resulting crowdsale storage', async () => {
+      describe('storage', async () => {
 
         it('should have an initialized crowdsale', async () => {
           let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -2985,11 +3899,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
           hexStrEquals(tokenInfo[1], tokenSymbol).should.be.eq(true)
           tokenInfo[2].toNumber().should.be.eq(tokenDecimals)
           tokenInfo[3].toNumber().should.be.eq(totalSupply)
-        })
-
-        it('should have an unchanged team wallet balance', async () => {
-          let curTeamBalance = await getBalance(viewBalance, teamWallet)
-          curTeamBalance.should.be.eq(0)
         })
       })
     })
@@ -3105,11 +4014,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
           crowdsaleInfo.length.should.be.eq(5)
           crowdsaleInfo[0].toNumber().should.be.eq(0)
         })
-
-        it('should have the correct value for the team\'s current balance', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(0)
-        })
       })
 
       context('multiple consecutive spends', async () => {
@@ -3122,17 +4026,15 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
         let purchaseContexts
         let paymentEvents
+        let paymentReturns
+
         let spendCalldataList
 
         beforeEach(async () => {
           purchaseContexts = []
           paymentEvents = []
+          paymentReturns = []
           spendCalldataList = []
-
-          // Transfer funds from teamWallet to exec
-          sendBalanceTo(teamWallet, exec)
-          let bal = await getBalance(viewBalance, teamWallet)
-          bal.should.be.eq(0)
 
           purchaseContexts.push(
             await testUtils.getContext.call(
@@ -3150,9 +4052,9 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
             ).should.be.fulfilled
           )
           purchaseContexts.length.should.be.eq(3)
-          purchaseContexts[0].should.not.eq('0x')
-          purchaseContexts[1].should.not.eq('0x')
-          purchaseContexts[2].should.not.eq('0x')
+          purchaseContexts[0].should.not.eq('0x0')
+          purchaseContexts[1].should.not.eq('0x0')
+          purchaseContexts[2].should.not.eq('0x0')
 
           spendCalldataList.push(
             await buyTokensUtil.buy.call(purchaseContexts[0]).should.be.fulfilled
@@ -3163,94 +4065,386 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
           spendCalldataList.push(
             await buyTokensUtil.buy.call(purchaseContexts[2]).should.be.fulfilled
           )
-          spendCalldataList[0].should.not.eq('0x')
-          spendCalldataList[1].should.not.eq('0x')
-          spendCalldataList[2].should.not.eq('0x')
+          spendCalldataList[0].should.not.eq('0x0')
+          spendCalldataList[1].should.not.eq('0x0')
+          spendCalldataList[2].should.not.eq('0x0')
+
+          let returnValues = await storage.exec.call(
+            crowdsaleBuyMock.address, executionID, spendCalldataList[0],
+            { from: exec, value: initialSpends[0] }
+          ).should.be.fulfilled
+          paymentReturns.push(returnValues)
 
           let events = await storage.exec(
             crowdsaleBuyMock.address, executionID, spendCalldataList[0],
             { from: exec, value: initialSpends[0] }
           ).then((tx) => {
-            return tx.logs
+            return tx.receipt.logs
           })
-          events.should.not.eq(null)
-          events.length.should.be.eq(2)
-          paymentEvents.push(events[0])
-          events[1].event.should.be.eq('ApplicationExecution')
+          paymentEvents.push(events)
+
+          returnValues = await storage.exec.call(
+            crowdsaleBuyMock.address, executionID, spendCalldataList[1],
+            { from: exec, value: initialSpends[1] }
+          ).should.be.fulfilled
+          paymentReturns.push(returnValues)
 
           events = await storage.exec(
             crowdsaleBuyMock.address, executionID, spendCalldataList[1],
             { from: exec, value: initialSpends[1] }
           ).then((tx) => {
-            return tx.logs
+            return tx.receipt.logs
           })
-          events.should.not.eq(null)
-          events.length.should.be.eq(2)
-          paymentEvents.push(events[0])
-          events[1].event.should.be.eq('ApplicationExecution')
+          paymentEvents.push(events)
+
+          returnValues = await storage.exec.call(
+            crowdsaleBuyMock.address, executionID, spendCalldataList[2],
+            { from: exec, value: initialSpends[2] }
+          ).should.be.fulfilled
+          paymentReturns.push(returnValues)
 
           events = await storage.exec(
             crowdsaleBuyMock.address, executionID, spendCalldataList[2],
             { from: exec, value: initialSpends[2] }
           ).then((tx) => {
-            return tx.logs
+            return tx.receipt.logs
           })
-          events.should.not.eq(null)
-          events.length.should.be.eq(1) // Final call will fail, as the sender's maximum is too restrictive
-          paymentEvents.push(events[0])
+          paymentEvents.push(events)
 
           paymentEvents.length.should.be.eq(3)
+          paymentReturns.length.should.be.eq(3)
         })
 
-        describe('payment results', async () => {
+        describe('returned data', async () => {
 
-          it('should emit 2 DeliveredPayment events, and 1 ApplicationException event', async () => {
-            paymentEvents[0].event.should.be.eq('DeliveredPayment')
-            paymentEvents[1].event.should.be.eq('DeliveredPayment')
-            paymentEvents[2].event.should.be.eq('ApplicationException')
-          })
+          let returnedData
 
-          describe('the DeliveredPayment events', async () => {
+          describe('payment (#1)', async () => {
 
-            it('should match the execution ID', async () => {
-              let emittedExecID = paymentEvents[0].args['execution_id']
-              emittedExecID.should.be.eq(executionID)
-              emittedExecID = paymentEvents[1].args['execution_id']
-              emittedExecID.should.be.eq(executionID)
+            beforeEach(async () => {
+              returnedData = paymentReturns[0]
             })
 
-            it('should match the team wallet destination address', async () => {
-              let destination = paymentEvents[0].args['destination']
-              destination.should.be.eq(teamWallet)
-              destination = paymentEvents[1].args['destination']
-              destination.should.be.eq(teamWallet)
+            it('should return a tuple with 3 fields', async () => {
+              returnedData.length.should.be.eq(3)
             })
 
-            it('should match the initial spend amounts', async () => {
-              let sent = paymentEvents[0].args['amount']
-              sent.toNumber().should.be.eq(initialSpends[0])
-              sent = paymentEvents[1].args['amount']
-              sent.toNumber().should.be.eq(initialSpends[1])
+            it('should return the correct number of events emitted', async () => {
+              returnedData[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              returnedData[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              returnedData[2].toNumber().should.be.eq(7)
             })
           })
 
-          describe('the ApplicationException event', async () => {
+          describe('payment (#2)', async () => {
 
-            it('should match the execution ID', async () => {
-              let emittedExecID = paymentEvents[2].args['execution_id']
-              emittedExecID.should.be.eq(executionID)
+            beforeEach(async () => {
+              returnedData = paymentReturns[1]
             })
 
-            it('should match the CrowdsaleBuyTokensMock address', async () => {
-              let emittedAddr = paymentEvents[2].args['application_address']
-              emittedAddr.should.be.eq(crowdsaleBuyMock.address)
+            it('should return a tuple with 3 fields', async () => {
+              returnedData.length.should.be.eq(3)
             })
 
-            it('should contain the error message \'UnderMinCap\'', async () => {
-              let message = paymentEvents[2].args['message']
-              hexStrEquals(message, 'UnderMinCap').should.be.eq(true)
+            it('should return the correct number of events emitted', async () => {
+              returnedData[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              returnedData[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              returnedData[2].toNumber().should.be.eq(7)
             })
           })
+
+          describe('payment (#3 - failed payment)', async () => {
+
+            beforeEach(async () => {
+              returnedData = paymentReturns[2]
+            })
+
+            it('should return a tuple with 3 fields', async () => {
+              returnedData.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              returnedData[0].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              returnedData[1].toNumber().should.be.eq(0)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              returnedData[2].toNumber().should.be.eq(0)
+            })
+          })
+        })
+
+        describe('events', async () => {
+
+          let emittedEvents
+
+          describe('event (#1)', async () => {
+
+            beforeEach(async () => {
+              emittedEvents = paymentEvents[0]
+            })
+
+            it('should emit a total of 3 events', async () => {
+              emittedEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[2].topics
+                eventData = emittedEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+
+            describe('the DeliveredPayment event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[0].topics
+                eventData = emittedEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(initialSpends[0])
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[1].topics
+                eventData = emittedEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(startPrice)
+                web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq((initialSpends[0] / startPrice) * (10 ** tokenDecimals))
+              })
+            })
+          })
+
+          describe('event (#2)', async () => {
+
+            beforeEach(async () => {
+              emittedEvents = paymentEvents[1]
+            })
+
+            it('should emit a total of 3 events', async () => {
+              emittedEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[2].topics
+                eventData = emittedEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
+            })
+
+            describe('the DeliveredPayment event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[0].topics
+                eventData = emittedEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(initialSpends[1])
+              })
+            })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[1].topics
+                eventData = emittedEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(startPrice)
+                web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq((initialSpends[1] / startPrice) * (10 ** tokenDecimals))
+              })
+            })
+          })
+
+          describe('event (#3 - failed payment)', async () => {
+
+            beforeEach(async () => {
+              emittedEvents = paymentEvents[2]
+            })
+
+            it('should emit a total of 1 event', async () => {
+              emittedEvents.length.should.be.eq(1)
+            })
+
+            describe('the ApplicationException event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = emittedEvents[0].topics
+                eventData = emittedEvents[0].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(exceptHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[1]
+                let emittedExecId = eventTopics[2]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have data matching \'UnderMinCap\'', async () => {
+                eventData.length.should.be.eq(194)
+                let message = eventData.substring(130, 194)
+                hexStrEquals(message, 'UnderMinCap').should.be.eq(true)
+              })
+            })
+          })
+        })
+
+        describe('storage', async () => {
 
           it('should have the correct amount of wei raised', async () => {
             let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -3295,13 +4489,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
               ).should.be.fulfilled
               balanceInfo.toNumber().should.be.eq(0)
             })
-          })
-
-          it('should have sent the wei to the team wallet', async () => {
-            let teamBalance = await getBalance(viewBalance, teamWallet)
-            teamBalance.should.be.eq(
-              initialSpends[0] + initialSpends[1]
-            )
           })
 
           describe('whitelist information', async () => {
@@ -3389,10 +4576,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
           beforeEach(async () => {
             newSendAmount = startPrice
-            // Transfer funds from teamWallet to exec
-            sendBalanceTo(teamWallet, exec)
-            let bal = await getBalance(viewBalance, teamWallet)
-            bal.should.be.eq(0)
 
             let purchaseContext = await testUtils.getContext.call(
               executionID, purchaserList[0], newSendAmount
@@ -3426,12 +4609,9 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
           let newSpendAmount
           let newSpendEvent
+          let newSpendReturn
 
           beforeEach(async () => {
-            // Transfer funds from teamWallet to exec
-            sendBalanceTo(teamWallet, exec)
-            let bal = await getBalance(viewBalance, teamWallet)
-            bal.should.be.eq(0)
 
             newSpendAmount = startPrice + (purchaserMaximums[0] - initialSpends[0])
             maxSpendAmount = (purchaserMaximums[0] - initialSpends[0])
@@ -3446,41 +4626,138 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
             ).should.be.fulfilled
             purchaseCalldata.should.not.eq('0x')
 
-            let events = await storage.exec(
+            newSpendReturn = await storage.exec.call(
+              crowdsaleBuyMock.address, executionID, purchaseCalldata,
+              { from: exec, value: newSpendAmount }
+            ).should.be.fulfilled
+
+            newSpendEvents = await storage.exec(
               crowdsaleBuyMock.address, executionID, purchaseCalldata,
               { from: exec, value: newSpendAmount }
             ).then((tx) => {
-              return tx.logs
+              return tx.receipt.logs
             })
-            events.should.not.eq(null)
-            events.length.should.be.eq(2)
-            newSpendEvent = events[0]
-            events[1].event.should.be.eq('ApplicationExecution')
           })
 
-          describe('payment results', async () => {
+          describe('returned data', async () => {
 
-            it('should emit a DeliveredPayment event', async () => {
-              newSpendEvent.event.should.be.eq('DeliveredPayment')
+            it('should return a tuple with 3 fields', async () => {
+              newSpendReturn.length.should.be.eq(3)
+            })
+
+            it('should return the correct number of events emitted', async () => {
+              newSpendReturn[0].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of addresses paid', async () => {
+              newSpendReturn[1].toNumber().should.be.eq(1)
+            })
+
+            it('should return the correct number of storage slots written to', async () => {
+              newSpendReturn[2].toNumber().should.be.eq(5)
+            })
+          })
+
+          describe('events', async () => {
+
+            it('should emit a total of 3 events', async () => {
+              newSpendEvents.length.should.be.eq(3)
+            })
+
+            describe('the ApplicationExecution event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = newSpendEvents[2].topics
+                eventData = newSpendEvents[2].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
+              })
+
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+              })
+
+              it('should have the target app address and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have an empty data field', async () => {
+                web3.toDecimal(eventData).should.be.eq(0)
+              })
             })
 
             describe('the DeliveredPayment event', async () => {
 
-              it('should match the execution ID', async () => {
-                let emittedExecID = newSpendEvent.args['execution_id']
-                emittedExecID.should.be.eq(executionID)
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = newSpendEvents[0].topics
+                eventData = newSpendEvents[0].data
               })
 
-              it('should match the team wallet destination address', async () => {
-                let destination = newSpendEvent.args['destination']
-                destination.should.be.eq(teamWallet)
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(3)
               })
 
-              it('should match the max spend amount', async () => {
-                let sent = newSpendEvent.args['amount']
-                sent.toNumber().should.be.eq(maxSpendAmount)
+              it('should list the correct event signature in the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+              })
+
+              it('should have the payment destination and execution id as the other 2 topics', async () => {
+                let emittedAddr = eventTopics[2]
+                let emittedExecId = eventTopics[1]
+                web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+                web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+              })
+
+              it('should have a data field containing the amount sent', async () => {
+                web3.toDecimal(eventData).should.be.eq(maxSpendAmount)
               })
             })
+
+            describe('the other event', async () => {
+
+              let eventTopics
+              let eventData
+
+              beforeEach(async () => {
+                eventTopics = newSpendEvents[1].topics
+                eventData = newSpendEvents[1].data
+              })
+
+              it('should have the correct number of topics', async () => {
+                eventTopics.length.should.be.eq(4)
+              })
+
+              it('should match the event signature for the first topic', async () => {
+                let sig = eventTopics[0]
+                web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+              })
+
+              it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+                web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+                web3.toDecimal(eventTopics[2]).should.be.eq(startPrice)
+                web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+              })
+
+              it('should contain the number of tokens purchased in the data field', async () => {
+                web3.toDecimal(eventData).should.be.eq((maxSpendAmount / startPrice) * (10 ** tokenDecimals))
+              })
+            })
+          })
+
+          describe('storage', async () => {
 
             it('should have the correct amount of wei raised', async () => {
               let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -3525,11 +4802,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
                 ).should.be.fulfilled
                 balanceInfo.toNumber().should.be.eq(0)
               })
-            })
-
-            it('should have sent the wei to the team wallet', async () => {
-              let teamBalance = await getBalance(viewBalance, teamWallet)
-              teamBalance.should.be.eq(maxSpendAmount)
             })
 
             describe('whitelist information', async () => {
@@ -3650,9 +4922,14 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
     context('global minimum exists', async () => {
 
-      let initialPurchaseEvent
-      let nextPurchaseEvent
+      let initialPurchaseEvents
+      let initialPurchaseReturn
+
+      let nextPurchaseEvents
+      let nextPurchaseReturn
+
       let invalidPurchaseEvent
+      let invalidPurchaseReturn
 
       let globalMin = 10 * oneToken // 10 token minimum purchase
       let spendAmount =
@@ -3660,12 +4937,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
         (web3.toBigNumber(10 ** tokenDecimals))
 
       beforeEach(async () => {
-
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
-
         let updateMinCalldata = await buyTokensUtil.updateGlobalMin.call(
           globalMin
         ).should.be.fulfilled
@@ -3701,28 +4972,32 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
         events.length.should.be.eq(1)
         events[0].event.should.be.eq('ApplicationExecution')
 
-        events = await storage.exec(
+        initialPurchaseReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: spendAmount }
+        ).should.be.fulfilled
+        initialPurchaseEvents = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: spendAmount }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        initialPurchaseEvent = events[0]
-        events[1].event.should.be.eq('ApplicationExecution')
 
-        events = await storage.exec(
+        nextPurchaseReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: spendAmount }
+        ).should.be.fulfilled
+        nextPurchaseEvents = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: spendAmount }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        nextPurchaseEvent = events[0]
-        events[1].event.should.be.eq('ApplicationExecution')
 
+        invalidPurchaseReturn = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, invalidCalldata,
+          { from: exec, value: spendAmount.minus(1) }
+        ).should.be.fulfilled
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, invalidCalldata,
           { from: exec, value: spendAmount.minus(1) }
@@ -3735,6 +5010,25 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       })
 
       context('sender does not buy at least the global minimum token amount', async () => {
+
+        describe('returned data', async () => {
+
+          it('should return a tuple with 3 fields', async () => {
+            invalidPurchaseReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            invalidPurchaseReturn[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            invalidPurchaseReturn[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            invalidPurchaseReturn[2].toNumber().should.be.eq(0)
+          })
+        })
 
         it('should emit an ApplicationException event', async () => {
           invalidPurchaseEvent.event.should.be.eq('ApplicationException')
@@ -3758,7 +5052,7 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
           })
         })
 
-        describe('the resulting crowdsale storage', async () => {
+        describe('storage', async () => {
 
           it('should have an initialized crowdsale', async () => {
             let saleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -3789,29 +5083,125 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
       context('sender has contributed before', async () => {
 
-        describe('payment results', async () => {
+        describe('returned data', async () => {
 
-          it('should emit a DeliveredPayment event', async () => {
-            nextPurchaseEvent.event.should.be.eq('DeliveredPayment')
+          it('should return a tuple with 3 fields', async () => {
+            nextPurchaseReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            nextPurchaseReturn[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            nextPurchaseReturn[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            nextPurchaseReturn[2].toNumber().should.be.eq(3)
+          })
+        })
+
+        describe('events', async () => {
+
+          it('should emit a total of 3 events', async () => {
+            nextPurchaseEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = nextPurchaseEvents[2].topics
+              eventData = nextPurchaseEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
           })
 
           describe('the DeliveredPayment event', async () => {
 
-            it('should match the execution ID', async () => {
-              let emittedExecID = nextPurchaseEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = nextPurchaseEvents[0].topics
+              eventData = nextPurchaseEvents[0].data
             })
 
-            it('should match the team wallet destination address', async () => {
-              let destination = nextPurchaseEvent.args['destination']
-              destination.should.be.eq(teamWallet)
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
             })
 
-            it('should match the amount spent', async () => {
-              let sent = nextPurchaseEvent.args['amount']
-              sent.should.be.bignumber.eq(spendAmount)
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(spendAmount.toNumber())
             })
           })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = nextPurchaseEvents[1].topics
+              eventData = nextPurchaseEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(startPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(globalMin)
+            })
+          })
+        })
+
+        describe('storage', async () => {
 
           it('should have the correct amount of wei raised', async () => {
             let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -3836,11 +5226,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
               ).should.be.fulfilled
               balanceInfo.toNumber().should.be.eq(globalMin * 2)
             })
-          })
-
-          it('should have sent the wei to the team wallet', async () => {
-            let teamBalance = await getBalance(viewBalance, teamWallet)
-            teamBalance.should.be.eq(spendAmount.toNumber() * 2)
           })
 
           it('should have the same token total supply', async () => {
@@ -3861,29 +5246,125 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
 
       context('sender has not contributed before', async () => {
 
-        describe('payment results', async () => {
+        describe('returned data', async () => {
 
-          it('should emit a DeliveredPayment event', async () => {
-            initialPurchaseEvent.event.should.be.eq('DeliveredPayment')
+          it('should return a tuple with 3 fields', async () => {
+            initialPurchaseReturn.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            initialPurchaseReturn[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            initialPurchaseReturn[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            initialPurchaseReturn[2].toNumber().should.be.eq(5)
+          })
+        })
+
+        describe('events', async () => {
+
+          it('should emit a total of 3 events', async () => {
+            initialPurchaseEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = initialPurchaseEvents[2].topics
+              eventData = initialPurchaseEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
           })
 
           describe('the DeliveredPayment event', async () => {
 
-            it('should match the execution ID', async () => {
-              let emittedExecID = initialPurchaseEvent.args['execution_id']
-              emittedExecID.should.be.eq(executionID)
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = initialPurchaseEvents[0].topics
+              eventData = initialPurchaseEvents[0].data
             })
 
-            it('should match the team wallet destination address', async () => {
-              let destination = initialPurchaseEvent.args['destination']
-              destination.should.be.eq(teamWallet)
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
             })
 
-            it('should match the amount spent', async () => {
-              let sent = initialPurchaseEvent.args['amount']
-              sent.should.be.bignumber.eq(spendAmount)
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(spendAmount.toNumber())
             })
           })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = initialPurchaseEvents[1].topics
+              eventData = initialPurchaseEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(startPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(globalMin)
+            })
+          })
+        })
+
+        describe('storage', async () => {
 
           it('should have the correct amount of wei raised', async () => {
             let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -3908,11 +5389,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
               ).should.be.fulfilled
               balanceInfo.toNumber().should.be.eq(globalMin * 2)
             })
-          })
-
-          it('should have sent the wei to the team wallet', async () => {
-            let teamBalance = await getBalance(viewBalance, teamWallet)
-            teamBalance.should.be.eq(spendAmount.toNumber() * 2)
           })
 
           it('should have the same token total supply', async () => {
@@ -3937,15 +5413,11 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
       let remainingTokens = deepToNumber(web3.toWei('100', 'ether')) // 100 tokens remaining
       let spendAmount = web3.toBigNumber((startPrice * remainingTokens) / (10 ** tokenDecimals)).plus(startPrice)
       let purchaseCalldata
-      let purchaseEvent
+      let purchaseEvents
+      let purchaseReturn
 
       beforeEach(async () => {
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
-
-        let clearTokensCalldata = await buyTokensUtil.setTokensRemaining(remainingTokens).should.be.fulfilled
+        let clearTokensCalldata = await buyTokensUtil.setTokensRemaining.call(remainingTokens).should.be.fulfilled
         clearTokensCalldata.should.not.eq('0x')
 
         let purchaseContext = await testUtils.getContext.call(
@@ -3968,41 +5440,140 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
         events.length.should.be.eq(1)
         events[0].event.should.be.eq('ApplicationExecution')
 
-        events = await storage.exec(
+        purchaseReturn = await storage.exec.call(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
-          { from: exec, value: spendAmount, gasPrice: 0 }
+          { from: exec, value: spendAmount }
+        ).should.be.fulfilled
+
+        purchaseEvents = await storage.exec(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: spendAmount }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        purchaseEvent = events[0]
-        events[1].event.should.be.eq('ApplicationExecution')
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit a DeliveredPayment event', async () => {
-          purchaseEvent.event.should.be.eq('DeliveredPayment')
+        it('should return a tuple with 3 fields', async () => {
+          purchaseReturn.length.should.be.eq(3)
+        })
+
+        it('should return the correct number of events emitted', async () => {
+          purchaseReturn[0].toNumber().should.be.eq(1)
+        })
+
+        it('should return the correct number of addresses paid', async () => {
+          purchaseReturn[1].toNumber().should.be.eq(1)
+        })
+
+        it('should return the correct number of storage slots written to', async () => {
+          purchaseReturn[2].toNumber().should.be.eq(5)
+        })
+      })
+
+      describe('events', async () => {
+
+        it('should emit a total of 3 events', async () => {
+          purchaseEvents.length.should.be.eq(3)
+        })
+
+        describe('the ApplicationExecution event', async () => {
+
+          let eventTopics
+          let eventData
+
+          beforeEach(async () => {
+            eventTopics = purchaseEvents[2].topics
+            eventData = purchaseEvents[2].data
+          })
+
+          it('should have the correct number of topics', async () => {
+            eventTopics.length.should.be.eq(3)
+          })
+
+          it('should list the correct event signature in the first topic', async () => {
+            let sig = eventTopics[0]
+            web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+          })
+
+          it('should have the target app address and execution id as the other 2 topics', async () => {
+            let emittedAddr = eventTopics[2]
+            let emittedExecId = eventTopics[1]
+            web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+            web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+          })
+
+          it('should have an empty data field', async () => {
+            web3.toDecimal(eventData).should.be.eq(0)
+          })
         })
 
         describe('the DeliveredPayment event', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvent.args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          let eventTopics
+          let eventData
+
+          beforeEach(async () => {
+            eventTopics = purchaseEvents[0].topics
+            eventData = purchaseEvents[0].data
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvent.args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should have the correct number of topics', async () => {
+            eventTopics.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvent.args['amount']
-            sent.should.be.bignumber.eq(spendAmount.minus(startPrice))
+          it('should list the correct event signature in the first topic', async () => {
+            let sig = eventTopics[0]
+            web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+          })
+
+          it('should have the payment destination and execution id as the other 2 topics', async () => {
+            let emittedAddr = eventTopics[2]
+            let emittedExecId = eventTopics[1]
+            web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+            web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+          })
+
+          it('should have a data field containing the amount sent', async () => {
+            web3.toDecimal(eventData).should.be.eq(spendAmount - startPrice)
           })
         })
+
+        describe('the other event', async () => {
+
+          let eventTopics
+          let eventData
+
+          beforeEach(async () => {
+            eventTopics = purchaseEvents[1].topics
+            eventData = purchaseEvents[1].data
+          })
+
+          it('should have the correct number of topics', async () => {
+            eventTopics.length.should.be.eq(4)
+          })
+
+          it('should match the event signature for the first topic', async () => {
+            let sig = eventTopics[0]
+            web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+          })
+
+          it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+            web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+            web3.toDecimal(eventTopics[2]).should.be.eq(startPrice)
+            web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+          })
+
+          it('should contain the number of tokens purchased in the data field', async () => {
+            web3.toDecimal(eventData).should.be.eq(
+              spendAmount.minus(startPrice).div(startPrice).mul(10 ** tokenDecimals).toNumber()
+            )
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -4029,11 +5600,6 @@ contract('#DutchBuyTokens - (flat price, 18 decimals)', function (accounts) {
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(spendAmount.minus(startPrice).toNumber())
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -4053,7 +5619,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
   let tokenConsoleUtil
   let buyTokensUtil
   let crowdsaleConsoleUtil
-  let viewBalance
 
   let exec = accounts[0]
   let updater = accounts[1]
@@ -4102,13 +5667,20 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
     accounts[accounts.length - 3]
   ]
 
-  before(async () => {
+  // Event signatures
+  let initHash = web3.sha3('ApplicationInitialized(bytes32,address,address,address)')
+  let finalHash = web3.sha3('ApplicationFinalization(bytes32,address)')
+  let execHash = web3.sha3('ApplicationExecution(bytes32,address)')
+  let payHash = web3.sha3('DeliveredPayment(bytes32,address,uint256)')
+  let exceptHash = web3.sha3('ApplicationException(address,bytes32,bytes)')
 
+  let purchaseHash = web3.sha3('Purchase(bytes32,uint256,uint256,uint256)')
+
+  before(async () => {
     storage = await AbstractStorage.new().should.be.fulfilled
     testUtils = await TestUtils.new().should.be.fulfilled
     tokenConsoleUtil = await TokenConsoleUtils.new().should.be.fulfilled
     buyTokensUtil = await BuyTokensUtil.new().should.be.fulfilled
-    viewBalance = await ViewBalance.new().should.be.fulfilled
 
     crowdsaleConsoleUtil = await CrowdsaleConsoleUtils.new().should.be.fulfilled
     adminMock = await AdminMockContract.new().should.be.fulfilled
@@ -4120,19 +5692,9 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
     tokenTransfer = await DutchTokenTransfer.new().should.be.fulfilled
     tokenTransferFrom = await DutchTokenTransferFrom.new().should.be.fulfilled
     tokenApprove = await DutchTokenApprove.new().should.be.fulfilled
-
-    // Transfer funds from teamWallet to exec
-    sendBalanceTo(teamWallet, exec)
-    let bal = await getBalance(viewBalance, teamWallet)
-    bal.should.be.eq(0)
   })
 
   beforeEach(async () => {
-    // Transfer funds from teamWallet to exec
-    sendBalanceTo(teamWallet, exec)
-    let bal = await getBalance(viewBalance, teamWallet)
-    bal.should.be.eq(0)
-
     // Reset crowdsale buy and crowdsale init contract times
     await crowdsaleBuyMock.resetTime().should.be.fulfilled
     let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -4261,6 +5823,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -4274,10 +5837,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[0]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -4297,16 +5857,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -4319,16 +5882,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -4341,66 +5907,351 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(1)
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 2 DeliveredPayment events, and 1 ApplicationException event', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('ApplicationException')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.toNumber().should.be.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.toNumber().should.be.eq(amounts[1])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
 
-        describe('the ApplicationException event', async () => {
+        describe('payment (#2)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
           })
 
-          it('should match the CrowdsaleBuyTokensMock address', async () => {
-            let emittedAddr = purchaseEvents[2].args['application_address']
-            emittedAddr.should.be.eq(crowdsaleBuyMock.address)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should contain the error message \'InvalidPurchaseAmount\'', async () => {
-            let message = purchaseEvents[2].args['message']
-            hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(0)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(startPrices[0])
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0] / startPrices[0])
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(startPrices[0])
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1] / startPrices[0])
+            })
+          })
+        })
+
+        describe('event (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 1 event', async () => {
+            emittedEvents.length.should.be.eq(1)
+          })
+
+          describe('the ApplicationException event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(exceptHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[1]
+              let emittedExecId = eventTopics[2]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have data matching \'InvalidPurchaseAmount\'', async () => {
+              eventData.length.should.be.eq(194)
+              let message = eventData.substring(130, 194)
+              hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -4443,13 +6294,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0] + amounts[1]
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -4463,31 +6307,31 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           ).should.be.fulfilled
           soldInfo.toNumber().should.be.eq(Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice))
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].toNumber().should.be.eq(startPrices[0])
-        statusInfo[1].toNumber().should.be.eq(endPrices[0])
-        statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(duration)
-        statusInfo[5].toNumber().should.be.eq(
-          sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
-        )
+          statusInfo[0].toNumber().should.be.eq(startPrices[0])
+          statusInfo[1].toNumber().should.be.eq(endPrices[0])
+          statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(duration)
+          statusInfo[5].toNumber().should.be.eq(
+            sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
+          )
+        })
       })
     })
 
@@ -4497,6 +6341,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -4511,10 +6356,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[1]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -4534,16 +6376,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -4556,16 +6401,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -4578,66 +6426,351 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(1)
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 2 DeliveredPayment events, and 1 ApplicationException event', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('ApplicationException')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.toNumber().should.be.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.toNumber().should.be.eq(amounts[1])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
 
-        describe('the ApplicationException event', async () => {
+        describe('payment (#2)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
           })
 
-          it('should match the CrowdsaleBuyTokensMock address', async () => {
-            let emittedAddr = purchaseEvents[2].args['application_address']
-            emittedAddr.should.be.eq(crowdsaleBuyMock.address)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should contain the error message \'InvalidPurchaseAmount\'', async () => {
-            let message = purchaseEvents[2].args['message']
-            hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(0)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(Math.floor(amounts[0] / expectedCurrentPrice))
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(Math.floor(amounts[1] / expectedCurrentPrice))
+            })
+          })
+        })
+
+        describe('event (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 1 event', async () => {
+            emittedEvents.length.should.be.eq(1)
+          })
+
+          describe('the ApplicationException event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(exceptHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[1]
+              let emittedExecId = eventTopics[2]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have data matching \'InvalidPurchaseAmount\'', async () => {
+              eventData.length.should.be.eq(194)
+              let message = eventData.substring(130, 194)
+              hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -4680,13 +6813,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0] + amounts[1]
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -4700,31 +6826,31 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           ).should.be.fulfilled
           soldInfo.toNumber().should.be.eq(Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice))
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].toNumber().should.be.eq(startPrices[0])
-        statusInfo[1].toNumber().should.be.eq(endPrices[0])
-        statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(duration / 2)
-        statusInfo[5].toNumber().should.be.eq(
-          sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
-        )
+          statusInfo[0].toNumber().should.be.eq(startPrices[0])
+          statusInfo[1].toNumber().should.be.eq(endPrices[0])
+          statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(duration / 2)
+          statusInfo[5].toNumber().should.be.eq(
+            sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
+          )
+        })
       })
     })
 
@@ -4734,6 +6860,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -4750,10 +6877,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[2]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -4773,16 +6897,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -4795,16 +6922,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -4817,66 +6947,351 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(1)
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 2 DeliveredPayment events, and 1 ApplicationException event', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('ApplicationException')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.toNumber().should.be.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.toNumber().should.be.eq(amounts[1])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
 
-        describe('the ApplicationException event', async () => {
+        describe('payment (#2)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
           })
 
-          it('should match the CrowdsaleBuyTokensMock address', async () => {
-            let emittedAddr = purchaseEvents[2].args['application_address']
-            emittedAddr.should.be.eq(crowdsaleBuyMock.address)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should contain the error message \'InvalidPurchaseAmount\'', async () => {
-            let message = purchaseEvents[2].args['message']
-            hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(0)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(Math.floor(amounts[0] / expectedCurrentPrice))
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(Math.floor(amounts[1] / expectedCurrentPrice))
+            })
+          })
+        })
+
+        describe('event (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 1 event', async () => {
+            emittedEvents.length.should.be.eq(1)
+          })
+
+          describe('the ApplicationException event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(exceptHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[1]
+              let emittedExecId = eventTopics[2]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have data matching \'InvalidPurchaseAmount\'', async () => {
+              eventData.length.should.be.eq(194)
+              let message = eventData.substring(130, 194)
+              hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -4919,13 +7334,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0] + amounts[1]
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -4939,31 +7347,31 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           ).should.be.fulfilled
           soldInfo.toNumber().should.be.eq(Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice))
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].toNumber().should.be.eq(startPrices[0])
-        statusInfo[1].toNumber().should.be.eq(endPrices[0])
-        statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(1)
-        statusInfo[5].toNumber().should.be.eq(
-          sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
-        )
+          statusInfo[0].toNumber().should.be.eq(startPrices[0])
+          statusInfo[1].toNumber().should.be.eq(endPrices[0])
+          statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(1)
+          statusInfo[5].toNumber().should.be.eq(
+            sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
+          )
+        })
       })
     })
   })
@@ -4993,6 +7401,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -5006,10 +7415,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[0]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -5029,16 +7435,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -5051,16 +7460,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -5073,66 +7485,351 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(1)
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 2 DeliveredPayment events, and 1 ApplicationException event', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('ApplicationException')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.toNumber().should.be.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.toNumber().should.be.eq(amounts[1])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
 
-        describe('the ApplicationException event', async () => {
+        describe('payment (#2)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
           })
 
-          it('should match the CrowdsaleBuyTokensMock address', async () => {
-            let emittedAddr = purchaseEvents[2].args['application_address']
-            emittedAddr.should.be.eq(crowdsaleBuyMock.address)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should contain the error message \'InvalidPurchaseAmount\'', async () => {
-            let message = purchaseEvents[2].args['message']
-            hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(0)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0] / expectedCurrentPrice)
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1] / expectedCurrentPrice)
+            })
+          })
+        })
+
+        describe('event (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 1 event', async () => {
+            emittedEvents.length.should.be.eq(1)
+          })
+
+          describe('the ApplicationException event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(exceptHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[1]
+              let emittedExecId = eventTopics[2]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have data matching \'InvalidPurchaseAmount\'', async () => {
+              eventData.length.should.be.eq(194)
+              let message = eventData.substring(130, 194)
+              hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -5175,13 +7872,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0] + amounts[1]
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -5195,31 +7885,31 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           ).should.be.fulfilled
           soldInfo.toNumber().should.be.eq(Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice))
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].toNumber().should.be.eq(startPrices[1])
-        statusInfo[1].toNumber().should.be.eq(endPrices[1])
-        statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(duration)
-        statusInfo[5].toNumber().should.be.eq(
-          sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
-        )
+          statusInfo[0].toNumber().should.be.eq(startPrices[1])
+          statusInfo[1].toNumber().should.be.eq(endPrices[1])
+          statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(duration)
+          statusInfo[5].toNumber().should.be.eq(
+            sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
+          )
+        })
       })
     })
 
@@ -5229,6 +7919,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -5243,10 +7934,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[1]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -5266,16 +7954,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -5288,16 +7979,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -5310,66 +8004,351 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(1)
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 2 DeliveredPayment events, and 1 ApplicationException event', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('ApplicationException')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.toNumber().should.be.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.toNumber().should.be.eq(amounts[1])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
 
-        describe('the ApplicationException event', async () => {
+        describe('payment (#2)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
           })
 
-          it('should match the CrowdsaleBuyTokensMock address', async () => {
-            let emittedAddr = purchaseEvents[2].args['application_address']
-            emittedAddr.should.be.eq(crowdsaleBuyMock.address)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should contain the error message \'InvalidPurchaseAmount\'', async () => {
-            let message = purchaseEvents[2].args['message']
-            hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(0)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(Math.floor(amounts[0] / expectedCurrentPrice))
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(Math.floor(amounts[1] / expectedCurrentPrice))
+            })
+          })
+        })
+
+        describe('event (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 1 event', async () => {
+            emittedEvents.length.should.be.eq(1)
+          })
+
+          describe('the ApplicationException event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(exceptHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[1]
+              let emittedExecId = eventTopics[2]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have data matching \'InvalidPurchaseAmount\'', async () => {
+              eventData.length.should.be.eq(194)
+              let message = eventData.substring(130, 194)
+              hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -5412,13 +8391,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0] + amounts[1]
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -5432,31 +8404,31 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           ).should.be.fulfilled
           soldInfo.toNumber().should.be.eq(Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice))
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].toNumber().should.be.eq(startPrices[1])
-        statusInfo[1].toNumber().should.be.eq(endPrices[1])
-        statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(duration / 2)
-        statusInfo[5].toNumber().should.be.eq(
-          sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
-        )
+          statusInfo[0].toNumber().should.be.eq(startPrices[1])
+          statusInfo[1].toNumber().should.be.eq(endPrices[1])
+          statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(duration / 2)
+          statusInfo[5].toNumber().should.be.eq(
+            sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
+          )
+        })
       })
     })
 
@@ -5466,6 +8438,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -5482,10 +8455,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[2]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -5505,16 +8475,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -5527,16 +8500,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -5549,66 +8525,351 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(1)
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 2 DeliveredPayment events, and 1 ApplicationException event', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('ApplicationException')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.toNumber().should.be.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.toNumber().should.be.eq(amounts[1])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
 
-        describe('the ApplicationException event', async () => {
+        describe('payment (#2)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
           })
 
-          it('should match the CrowdsaleBuyTokensMock address', async () => {
-            let emittedAddr = purchaseEvents[2].args['application_address']
-            emittedAddr.should.be.eq(crowdsaleBuyMock.address)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should contain the error message \'InvalidPurchaseAmount\'', async () => {
-            let message = purchaseEvents[2].args['message']
-            hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(0)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(Math.floor(amounts[0] / expectedCurrentPrice))
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(Math.floor(amounts[1] / expectedCurrentPrice))
+            })
+          })
+        })
+
+        describe('event (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 1 event', async () => {
+            emittedEvents.length.should.be.eq(1)
+          })
+
+          describe('the ApplicationException event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(exceptHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[1]
+              let emittedExecId = eventTopics[2]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have data matching \'InvalidPurchaseAmount\'', async () => {
+              eventData.length.should.be.eq(194)
+              let message = eventData.substring(130, 194)
+              hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -5651,13 +8912,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0] + amounts[1]
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -5671,31 +8925,31 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           ).should.be.fulfilled
           soldInfo.toNumber().should.be.eq(Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice))
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].toNumber().should.be.eq(startPrices[1])
-        statusInfo[1].toNumber().should.be.eq(endPrices[1])
-        statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(1)
-        statusInfo[5].toNumber().should.be.eq(
-          sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
-        )
+          statusInfo[0].toNumber().should.be.eq(startPrices[1])
+          statusInfo[1].toNumber().should.be.eq(endPrices[1])
+          statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(1)
+          statusInfo[5].toNumber().should.be.eq(
+            sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
+          )
+        })
       })
     })
   })
@@ -5725,6 +8979,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -5738,10 +8993,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[0]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -5761,16 +9013,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -5783,16 +9038,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -5805,66 +9063,351 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(1)
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 2 DeliveredPayment events, and 1 ApplicationException event', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('ApplicationException')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.toNumber().should.be.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.toNumber().should.be.eq(amounts[1])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
 
-        describe('the ApplicationException event', async () => {
+        describe('payment (#2)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
           })
 
-          it('should match the CrowdsaleBuyTokensMock address', async () => {
-            let emittedAddr = purchaseEvents[2].args['application_address']
-            emittedAddr.should.be.eq(crowdsaleBuyMock.address)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should contain the error message \'InvalidPurchaseAmount\'', async () => {
-            let message = purchaseEvents[2].args['message']
-            hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(0)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0] / expectedCurrentPrice)
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1] / expectedCurrentPrice)
+            })
+          })
+        })
+
+        describe('event (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 1 event', async () => {
+            emittedEvents.length.should.be.eq(1)
+          })
+
+          describe('the ApplicationException event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(exceptHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[1]
+              let emittedExecId = eventTopics[2]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have data matching \'InvalidPurchaseAmount\'', async () => {
+              eventData.length.should.be.eq(194)
+              let message = eventData.substring(130, 194)
+              hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -5907,13 +9450,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0] + amounts[1]
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -5927,31 +9463,31 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           ).should.be.fulfilled
           soldInfo.toNumber().should.be.eq(Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice))
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].toNumber().should.be.eq(startPrices[2])
-        statusInfo[1].toNumber().should.be.eq(endPrices[2])
-        statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(duration)
-        statusInfo[5].toNumber().should.be.eq(
-          sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
-        )
+          statusInfo[0].toNumber().should.be.eq(startPrices[2])
+          statusInfo[1].toNumber().should.be.eq(endPrices[2])
+          statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(duration)
+          statusInfo[5].toNumber().should.be.eq(
+            sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
+          )
+        })
       })
     })
 
@@ -5961,6 +9497,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -5975,10 +9512,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[1]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -5998,16 +9532,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -6020,16 +9557,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -6042,66 +9582,351 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(1)
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 2 DeliveredPayment events, and 1 ApplicationException event', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('ApplicationException')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.toNumber().should.be.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.toNumber().should.be.eq(amounts[1])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
 
-        describe('the ApplicationException event', async () => {
+        describe('payment (#2)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
           })
 
-          it('should match the CrowdsaleBuyTokensMock address', async () => {
-            let emittedAddr = purchaseEvents[2].args['application_address']
-            emittedAddr.should.be.eq(crowdsaleBuyMock.address)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should contain the error message \'InvalidPurchaseAmount\'', async () => {
-            let message = purchaseEvents[2].args['message']
-            hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(0)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(Math.floor(amounts[0] / expectedCurrentPrice))
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(Math.floor(amounts[1] / expectedCurrentPrice))
+            })
+          })
+        })
+
+        describe('event (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 1 event', async () => {
+            emittedEvents.length.should.be.eq(1)
+          })
+
+          describe('the ApplicationException event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(exceptHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[1]
+              let emittedExecId = eventTopics[2]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have data matching \'InvalidPurchaseAmount\'', async () => {
+              eventData.length.should.be.eq(194)
+              let message = eventData.substring(130, 194)
+              hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -6144,13 +9969,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0] + amounts[1]
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -6164,31 +9982,31 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           ).should.be.fulfilled
           soldInfo.toNumber().should.be.eq(Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice))
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].toNumber().should.be.eq(startPrices[2])
-        statusInfo[1].toNumber().should.be.eq(endPrices[2])
-        statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(duration / 2)
-        statusInfo[5].toNumber().should.be.eq(
-          sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
-        )
+          statusInfo[0].toNumber().should.be.eq(startPrices[2])
+          statusInfo[1].toNumber().should.be.eq(endPrices[2])
+          statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(duration / 2)
+          statusInfo[5].toNumber().should.be.eq(
+            sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
+          )
+        })
       })
     })
 
@@ -6198,6 +10016,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -6214,10 +10033,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[2]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -6237,16 +10053,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -6259,16 +10078,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -6281,66 +10103,351 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(1)
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 2 DeliveredPayment events, and 1 ApplicationException event', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('ApplicationException')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.toNumber().should.be.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.toNumber().should.be.eq(amounts[1])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
 
-        describe('the ApplicationException event', async () => {
+        describe('payment (#2)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
           })
 
-          it('should match the CrowdsaleBuyTokensMock address', async () => {
-            let emittedAddr = purchaseEvents[2].args['application_address']
-            emittedAddr.should.be.eq(crowdsaleBuyMock.address)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should contain the error message \'InvalidPurchaseAmount\'', async () => {
-            let message = purchaseEvents[2].args['message']
-            hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(0)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(0)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(Math.floor(amounts[0] / expectedCurrentPrice))
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1])
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice)
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(Math.floor(amounts[1] / expectedCurrentPrice))
+            })
+          })
+        })
+
+        describe('event (#3 - failed payment)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 1 event', async () => {
+            emittedEvents.length.should.be.eq(1)
+          })
+
+          describe('the ApplicationException event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(exceptHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[1]
+              let emittedExecId = eventTopics[2]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have data matching \'InvalidPurchaseAmount\'', async () => {
+              eventData.length.should.be.eq(194)
+              let message = eventData.substring(130, 194)
+              hexStrEquals(message, 'InvalidPurchaseAmount').should.be.eq(true)
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -6383,13 +10490,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0] + amounts[1]
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -6403,31 +10503,31 @@ contract('#DutchBuyTokens: price change tests - (various prices, 0 decimals)', f
           ).should.be.fulfilled
           soldInfo.toNumber().should.be.eq(Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice))
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].toNumber().should.be.eq(startPrices[2])
-        statusInfo[1].toNumber().should.be.eq(endPrices[2])
-        statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(1)
-        statusInfo[5].toNumber().should.be.eq(
-          sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
-        )
+          statusInfo[0].toNumber().should.be.eq(startPrices[2])
+          statusInfo[1].toNumber().should.be.eq(endPrices[2])
+          statusInfo[2].toNumber().should.be.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(1)
+          statusInfo[5].toNumber().should.be.eq(
+            sellCap - Math.floor((amounts[0] + amounts[1]) / expectedCurrentPrice)
+          )
+        })
       })
     })
   })
@@ -6441,7 +10541,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
   let tokenConsoleUtil
   let buyTokensUtil
   let crowdsaleConsoleUtil
-  let viewBalance
 
   let exec = accounts[0]
   let updater = accounts[1]
@@ -6491,13 +10590,20 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
     accounts[accounts.length - 3]
   ]
 
-  before(async () => {
+  // Event signatures
+  let initHash = web3.sha3('ApplicationInitialized(bytes32,address,address,address)')
+  let finalHash = web3.sha3('ApplicationFinalization(bytes32,address)')
+  let execHash = web3.sha3('ApplicationExecution(bytes32,address)')
+  let payHash = web3.sha3('DeliveredPayment(bytes32,address,uint256)')
+  let exceptHash = web3.sha3('ApplicationException(address,bytes32,bytes)')
 
+  let purchaseHash = web3.sha3('Purchase(bytes32,uint256,uint256,uint256)')
+
+  before(async () => {
     storage = await AbstractStorage.new().should.be.fulfilled
     testUtils = await TestUtils.new().should.be.fulfilled
     tokenConsoleUtil = await TokenConsoleUtils.new().should.be.fulfilled
     buyTokensUtil = await BuyTokensUtil.new().should.be.fulfilled
-    viewBalance = await ViewBalance.new().should.be.fulfilled
 
     crowdsaleConsoleUtil = await CrowdsaleConsoleUtils.new().should.be.fulfilled
     adminMock = await AdminMockContract.new().should.be.fulfilled
@@ -6509,18 +10615,9 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
     tokenTransfer = await DutchTokenTransfer.new().should.be.fulfilled
     tokenTransferFrom = await DutchTokenTransferFrom.new().should.be.fulfilled
     tokenApprove = await DutchTokenApprove.new().should.be.fulfilled
-
-    // Transfer funds from teamWallet to exec
-    sendBalanceTo(teamWallet, exec)
-    let bal = await getBalance(viewBalance, teamWallet)
-    bal.should.be.eq(0)
   })
 
   beforeEach(async () => {
-    // Transfer funds from teamWallet to exec
-    sendBalanceTo(teamWallet, exec)
-    let bal = await getBalance(viewBalance, teamWallet)
-    bal.should.be.eq(0)
 
     // Reset crowdsale buy and crowdsale init contract times
     await crowdsaleBuyMock.resetTime().should.be.fulfilled
@@ -6650,6 +10747,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -6663,10 +10761,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[0]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -6686,16 +10781,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -6708,16 +10806,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -6730,55 +10831,410 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 3 DeliveredPayment events', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('DeliveredPayment')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[2].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.should.be.bignumber.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.should.be.bignumber.eq(amounts[1])
-            sent = purchaseEvents[2].args['amount']
-            sent.should.be.bignumber.eq(amounts[2])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#2)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+
+        describe('payment (#3)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#3)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -6827,13 +11283,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0].plus(amounts[1]).plus(amounts[2]).toNumber()
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -6850,34 +11299,34 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
               .times(unitPrice).div(expectedCurrentPrice)
           )
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].should.be.bignumber.eq(startPrices[0])
-        statusInfo[1].should.be.bignumber.eq(endPrices[0])
-        statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(duration)
-        statusInfo[5].should.be.bignumber.eq(
-          sellCap.minus(
-            amounts[0].plus(amounts[1]).plus(amounts[2])
-              .times(unitPrice).div(expectedCurrentPrice)
+          statusInfo[0].should.be.bignumber.eq(startPrices[0])
+          statusInfo[1].should.be.bignumber.eq(endPrices[0])
+          statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(duration)
+          statusInfo[5].should.be.bignumber.eq(
+            sellCap.minus(
+              amounts[0].plus(amounts[1]).plus(amounts[2])
+                .times(unitPrice).div(expectedCurrentPrice)
+            )
           )
-        )
+        })
       })
     })
 
@@ -6887,6 +11336,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -6901,10 +11351,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[1]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -6924,16 +11371,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -6946,16 +11396,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -6968,55 +11421,410 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 3 DeliveredPayment events', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('DeliveredPayment')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[2].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.should.be.bignumber.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.should.be.bignumber.eq(amounts[1])
-            sent = purchaseEvents[2].args['amount']
-            sent.should.be.bignumber.eq(amounts[2])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#2)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+
+        describe('payment (#3)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#3)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -7065,13 +11873,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0].plus(amounts[1]).plus(amounts[2]).toNumber()
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -7088,44 +11889,44 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
               .times(unitPrice).div(expectedCurrentPrice)
           )
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].should.be.bignumber.eq(startPrices[0])
-        statusInfo[1].should.be.bignumber.eq(endPrices[0])
-        statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(duration / 2)
-        statusInfo[5].should.be.bignumber.eq(
-          sellCap.minus(
-            amounts[0].plus(amounts[1]).plus(amounts[2])
-              .times(unitPrice).div(expectedCurrentPrice)
+          statusInfo[0].should.be.bignumber.eq(startPrices[0])
+          statusInfo[1].should.be.bignumber.eq(endPrices[0])
+          statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(duration / 2)
+          statusInfo[5].should.be.bignumber.eq(
+            sellCap.minus(
+              amounts[0].plus(amounts[1]).plus(amounts[2])
+                .times(unitPrice).div(expectedCurrentPrice)
+            )
           )
-        )
+        })
       })
     })
 
     describe('near the end', async () => {
 
       let expectedCurrentPrice
-      let optionTwo
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -7145,10 +11946,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[2]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -7168,16 +11966,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -7190,16 +11991,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -7212,56 +12016,410 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        let message = events[0].args['message']
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 3 DeliveredPayment events', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('DeliveredPayment')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[2].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.should.be.bignumber.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.should.be.bignumber.eq(amounts[1])
-            sent = purchaseEvents[2].args['amount']
-            sent.should.be.bignumber.eq(amounts[2])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#2)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+
+        describe('payment (#3)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#3)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -7310,13 +12468,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0].plus(amounts[1]).plus(amounts[2]).toNumber()
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -7333,34 +12484,34 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
               .times(unitPrice).div(expectedCurrentPrice).toFixed(0, 1)
           )
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].should.be.bignumber.eq(startPrices[0])
-        statusInfo[1].should.be.bignumber.eq(endPrices[0])
-        statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(1)
-        statusInfo[5].should.be.bignumber.eq(
-          sellCap.minus(
-            amounts[0].plus(amounts[1]).plus(amounts[2])
-              .times(unitPrice).div(expectedCurrentPrice).toFixed(0, 1)
+          statusInfo[0].should.be.bignumber.eq(startPrices[0])
+          statusInfo[1].should.be.bignumber.eq(endPrices[0])
+          statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(1)
+          statusInfo[5].should.be.bignumber.eq(
+            sellCap.minus(
+              amounts[0].plus(amounts[1]).plus(amounts[2])
+                .times(unitPrice).div(expectedCurrentPrice).toFixed(0, 1)
+            )
           )
-        )
+        })
       })
     })
   })
@@ -7390,6 +12541,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -7403,10 +12555,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[0]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -7426,16 +12575,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -7448,16 +12600,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -7470,55 +12625,410 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 3 DeliveredPayment events', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('DeliveredPayment')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[2].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.should.be.bignumber.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.should.be.bignumber.eq(amounts[1])
-            sent = purchaseEvents[2].args['amount']
-            sent.should.be.bignumber.eq(amounts[2])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#2)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+
+        describe('payment (#3)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#3)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -7567,13 +13077,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0].plus(amounts[1]).plus(amounts[2]).toNumber()
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -7590,34 +13093,34 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
               .times(unitPrice).div(expectedCurrentPrice)
           )
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].should.be.bignumber.eq(startPrices[1])
-        statusInfo[1].should.be.bignumber.eq(endPrices[1])
-        statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(duration)
-        statusInfo[5].should.be.bignumber.eq(
-          sellCap.minus(
-            amounts[0].plus(amounts[1]).plus(amounts[2])
-              .times(unitPrice).div(expectedCurrentPrice)
+          statusInfo[0].should.be.bignumber.eq(startPrices[1])
+          statusInfo[1].should.be.bignumber.eq(endPrices[1])
+          statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(duration)
+          statusInfo[5].should.be.bignumber.eq(
+            sellCap.minus(
+              amounts[0].plus(amounts[1]).plus(amounts[2])
+                .times(unitPrice).div(expectedCurrentPrice)
+            )
           )
-        )
+        })
       })
     })
 
@@ -7627,6 +13130,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -7641,10 +13145,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[1]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -7664,16 +13165,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -7686,16 +13190,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -7708,55 +13215,410 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 3 DeliveredPayment events', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('DeliveredPayment')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[2].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.should.be.bignumber.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.should.be.bignumber.eq(amounts[1])
-            sent = purchaseEvents[2].args['amount']
-            sent.should.be.bignumber.eq(amounts[2])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#2)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+
+        describe('payment (#3)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#3)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -7805,13 +13667,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0].plus(amounts[1]).plus(amounts[2]).toNumber()
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -7828,44 +13683,44 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
               .times(unitPrice).div(expectedCurrentPrice)
           )
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].should.be.bignumber.eq(startPrices[1])
-        statusInfo[1].should.be.bignumber.eq(endPrices[1])
-        statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(duration / 2)
-        statusInfo[5].should.be.bignumber.eq(
-          sellCap.minus(
-            amounts[0].plus(amounts[1]).plus(amounts[2])
-              .times(unitPrice).div(expectedCurrentPrice)
+          statusInfo[0].should.be.bignumber.eq(startPrices[1])
+          statusInfo[1].should.be.bignumber.eq(endPrices[1])
+          statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(duration / 2)
+          statusInfo[5].should.be.bignumber.eq(
+            sellCap.minus(
+              amounts[0].plus(amounts[1]).plus(amounts[2])
+                .times(unitPrice).div(expectedCurrentPrice)
+            )
           )
-        )
+        })
       })
     })
 
     describe('near the end', async () => {
 
       let expectedCurrentPrice
-      let optionTwo
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -7885,10 +13740,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[2]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -7908,16 +13760,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -7930,16 +13785,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -7952,56 +13810,410 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        let message = events[0].args['message']
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 3 DeliveredPayment events', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('DeliveredPayment')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[2].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.should.be.bignumber.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.should.be.bignumber.eq(amounts[1])
-            sent = purchaseEvents[2].args['amount']
-            sent.should.be.bignumber.eq(amounts[2])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#2)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+
+        describe('payment (#3)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#3)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -8050,13 +14262,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0].plus(amounts[1]).plus(amounts[2]).toNumber()
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -8073,34 +14278,34 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
               .times(unitPrice).div(expectedCurrentPrice).toFixed(0, 1)
           )
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].should.be.bignumber.eq(startPrices[1])
-        statusInfo[1].should.be.bignumber.eq(endPrices[1])
-        statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(1)
-        statusInfo[5].should.be.bignumber.eq(
-          sellCap.minus(
-            amounts[0].plus(amounts[1]).plus(amounts[2])
-              .times(unitPrice).div(expectedCurrentPrice).toFixed(0, 1)
+          statusInfo[0].should.be.bignumber.eq(startPrices[1])
+          statusInfo[1].should.be.bignumber.eq(endPrices[1])
+          statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(1)
+          statusInfo[5].should.be.bignumber.eq(
+            sellCap.minus(
+              amounts[0].plus(amounts[1]).plus(amounts[2])
+                .times(unitPrice).div(expectedCurrentPrice).toFixed(0, 1)
+            )
           )
-        )
+        })
       })
     })
   })
@@ -8130,6 +14335,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -8143,10 +14349,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[0]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -8166,16 +14369,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -8188,16 +14394,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -8210,55 +14419,410 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 3 DeliveredPayment events', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('DeliveredPayment')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[2].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.should.be.bignumber.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.should.be.bignumber.eq(amounts[1])
-            sent = purchaseEvents[2].args['amount']
-            sent.should.be.bignumber.eq(amounts[2])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#2)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+
+        describe('payment (#3)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#3)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(startTime)
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -8307,13 +14871,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0].plus(amounts[1]).plus(amounts[2]).toNumber()
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -8330,34 +14887,34 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
               .times(unitPrice).div(expectedCurrentPrice)
           )
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].should.be.bignumber.eq(startPrices[2])
-        statusInfo[1].should.be.bignumber.eq(endPrices[2])
-        statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(duration)
-        statusInfo[5].should.be.bignumber.eq(
-          sellCap.minus(
-            amounts[0].plus(amounts[1]).plus(amounts[2])
-              .times(unitPrice).div(expectedCurrentPrice)
+          statusInfo[0].should.be.bignumber.eq(startPrices[2])
+          statusInfo[1].should.be.bignumber.eq(endPrices[2])
+          statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(duration)
+          statusInfo[5].should.be.bignumber.eq(
+            sellCap.minus(
+              amounts[0].plus(amounts[1]).plus(amounts[2])
+                .times(unitPrice).div(expectedCurrentPrice)
+            )
           )
-        )
+        })
       })
     })
 
@@ -8367,6 +14924,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -8381,10 +14939,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[1]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -8404,16 +14959,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -8426,16 +14984,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -8448,55 +15009,410 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 3 DeliveredPayment events', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('DeliveredPayment')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[2].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.should.be.bignumber.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.should.be.bignumber.eq(amounts[1])
-            sent = purchaseEvents[2].args['amount']
-            sent.should.be.bignumber.eq(amounts[2])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#2)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+
+        describe('payment (#3)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#3)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[1])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -8545,13 +15461,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0].plus(amounts[1]).plus(amounts[2]).toNumber()
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -8568,44 +15477,44 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
               .times(unitPrice).div(expectedCurrentPrice)
           )
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].should.be.bignumber.eq(startPrices[2])
-        statusInfo[1].should.be.bignumber.eq(endPrices[2])
-        statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(duration / 2)
-        statusInfo[5].should.be.bignumber.eq(
-          sellCap.minus(
-            amounts[0].plus(amounts[1]).plus(amounts[2])
-              .times(unitPrice).div(expectedCurrentPrice)
+          statusInfo[0].should.be.bignumber.eq(startPrices[2])
+          statusInfo[1].should.be.bignumber.eq(endPrices[2])
+          statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(duration / 2)
+          statusInfo[5].should.be.bignumber.eq(
+            sellCap.minus(
+              amounts[0].plus(amounts[1]).plus(amounts[2])
+                .times(unitPrice).div(expectedCurrentPrice)
+            )
           )
-        )
+        })
       })
     })
 
     describe('near the end', async () => {
 
       let expectedCurrentPrice
-      let optionTwo
 
       let purchaseCalldata
       let purchaseEvents
+      let purchaseReturns
 
       let amounts = []
 
@@ -8625,10 +15534,7 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ]
 
         purchaseEvents = []
-        // Transfer funds from teamWallet to exec
-        sendBalanceTo(teamWallet, exec)
-        let bal = await getBalance(viewBalance, teamWallet)
-        bal.should.be.eq(0)
+        purchaseReturns = []
 
         await crowdsaleBuyMock.setTime(purchaseTimes[2]).should.be.fulfilled
         let storedTime = await crowdsaleBuyMock.set_time.call().should.be.fulfilled
@@ -8648,16 +15554,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        let returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[0] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         let events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[0] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Second purchase, account 1; amount 1
         purchaseContext = await testUtils.getContext.call(
@@ -8670,16 +15579,19 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[1] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[1] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
 
         // Third purchase, account 2; amount 2
         purchaseContext = await testUtils.getContext.call(
@@ -8692,56 +15604,410 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
         ).should.be.fulfilled
         purchaseCalldata.should.not.eq('0x')
 
+        returnedData = await storage.exec.call(
+          crowdsaleBuyMock.address, executionID, purchaseCalldata,
+          { from: exec, value: amounts[2] }
+        ).should.be.fulfilled
+        purchaseReturns.push(returnedData)
+
         events = await storage.exec(
           crowdsaleBuyMock.address, executionID, purchaseCalldata,
           { from: exec, value: amounts[2] }
         ).then((tx) => {
-          return tx.logs
+          return tx.receipt.logs
         })
-        events.should.not.eq(null)
-        let message = events[0].args['message']
-        events.length.should.be.eq(2)
-        events[1].event.should.be.eq('ApplicationExecution')
-        purchaseEvents.push(events[0])
+        purchaseEvents.push(events)
       })
 
-      describe('payment results', async () => {
+      describe('returned data', async () => {
 
-        it('should emit 3 DeliveredPayment events', async () => {
-          purchaseEvents[0].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[1].event.should.be.eq('DeliveredPayment')
-          purchaseEvents[2].event.should.be.eq('DeliveredPayment')
-        })
+        let returnedData
 
-        describe('the DeliveredPayment events', async () => {
+        describe('payment (#1)', async () => {
 
-          it('should match the execution ID', async () => {
-            let emittedExecID = purchaseEvents[0].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[1].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
-            emittedExecID = purchaseEvents[2].args['execution_id']
-            emittedExecID.should.be.eq(executionID)
+          beforeEach(async () => {
+            returnedData = purchaseReturns[0]
           })
 
-          it('should match the team wallet destination address', async () => {
-            let destination = purchaseEvents[0].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[1].args['destination']
-            destination.should.be.eq(teamWallet)
-            destination = purchaseEvents[2].args['destination']
-            destination.should.be.eq(teamWallet)
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
           })
 
-          it('should match the amount spent', async () => {
-            let sent = purchaseEvents[0].args['amount']
-            sent.should.be.bignumber.eq(amounts[0])
-            sent = purchaseEvents[1].args['amount']
-            sent.should.be.bignumber.eq(amounts[1])
-            sent = purchaseEvents[2].args['amount']
-            sent.should.be.bignumber.eq(amounts[2])
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
           })
         })
+
+        describe('payment (#2)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[1]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+
+        describe('payment (#3)', async () => {
+
+          beforeEach(async () => {
+            returnedData = purchaseReturns[2]
+          })
+
+          it('should return a tuple with 3 fields', async () => {
+            returnedData.length.should.be.eq(3)
+          })
+
+          it('should return the correct number of events emitted', async () => {
+            returnedData[0].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of addresses paid', async () => {
+            returnedData[1].toNumber().should.be.eq(1)
+          })
+
+          it('should return the correct number of storage slots written to', async () => {
+            returnedData[2].toNumber().should.be.eq(5)
+          })
+        })
+      })
+
+      describe('events', async () => {
+
+        let emittedEvents
+
+        describe('event (#1)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[0]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[0].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#2)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[1]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[1].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+
+        describe('event (#3)', async () => {
+
+          beforeEach(async () => {
+            emittedEvents = purchaseEvents[2]
+          })
+
+          it('should emit a total of 3 events', async () => {
+            emittedEvents.length.should.be.eq(3)
+          })
+
+          describe('the ApplicationExecution event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[2].topics
+              eventData = emittedEvents[2].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(execHash))
+            })
+
+            it('should have the target app address and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(crowdsaleBuyMock.address))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have an empty data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(0)
+            })
+          })
+
+          describe('the DeliveredPayment event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[0].topics
+              eventData = emittedEvents[0].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(3)
+            })
+
+            it('should list the correct event signature in the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(payHash))
+            })
+
+            it('should have the payment destination and execution id as the other 2 topics', async () => {
+              let emittedAddr = eventTopics[2]
+              let emittedExecId = eventTopics[1]
+              web3.toDecimal(emittedAddr).should.be.eq(web3.toDecimal(teamWallet))
+              web3.toDecimal(emittedExecId).should.be.eq(web3.toDecimal(executionID))
+            })
+
+            it('should have a data field containing the amount sent', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].toNumber())
+            })
+          })
+
+          describe('the other event', async () => {
+
+            let eventTopics
+            let eventData
+
+            beforeEach(async () => {
+              eventTopics = emittedEvents[1].topics
+              eventData = emittedEvents[1].data
+            })
+
+            it('should have the correct number of topics', async () => {
+              eventTopics.length.should.be.eq(4)
+            })
+
+            it('should match the event signature for the first topic', async () => {
+              let sig = eventTopics[0]
+              web3.toDecimal(sig).should.be.eq(web3.toDecimal(purchaseHash))
+            })
+
+            it('should match the exec id, current sale rate, and current time for the other topics', async () => {
+              web3.toDecimal(eventTopics[1]).should.be.eq(web3.toDecimal(executionID))
+              web3.toDecimal(eventTopics[2]).should.be.eq(expectedCurrentPrice.toNumber())
+              web3.toDecimal(eventTopics[3]).should.be.eq(purchaseTimes[2])
+            })
+
+            it('should contain the number of tokens purchased in the data field', async () => {
+              web3.toDecimal(eventData).should.be.eq(amounts[2].times(unitPrice).div(expectedCurrentPrice).toNumber())
+            })
+          })
+        })
+      })
+
+      describe('storage', async () => {
 
         it('should have the correct amount of wei raised', async () => {
           let crowdsaleInfo = await initCrowdsale.getCrowdsaleInfo.call(
@@ -8790,13 +16056,6 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
           })
         })
 
-        it('should have sent the wei to the team wallet', async () => {
-          let teamBalance = await getBalance(viewBalance, teamWallet)
-          teamBalance.should.be.eq(
-            amounts[0].plus(amounts[1]).plus(amounts[2]).toNumber()
-          )
-        })
-
         it('should have the same token total supply', async () => {
           let supplyInfo = await initCrowdsale.totalSupply.call(
             storage.address, executionID
@@ -8813,34 +16072,34 @@ contract('#DutchBuyTokens: price change tests - (various prices, 18 decimals)', 
               .times(unitPrice).div(expectedCurrentPrice).toFixed(0, 1)
           )
         })
-      })
 
-      it('should have the correct start and end times', async () => {
-        let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        timeInfo.length.should.be.eq(2)
-        timeInfo[0].toNumber().should.be.eq(startTime)
-        timeInfo[1].toNumber().should.be.eq(startTime + duration)
-      })
+        it('should have the correct start and end times', async () => {
+          let timeInfo = await initCrowdsale.getCrowdsaleStartAndEndTimes.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          timeInfo.length.should.be.eq(2)
+          timeInfo[0].toNumber().should.be.eq(startTime)
+          timeInfo[1].toNumber().should.be.eq(startTime + duration)
+        })
 
-      it('should correctly calculate the rate in InitCrowdsale', async () => {
-        let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
-          storage.address, executionID
-        ).should.be.fulfilled
-        statusInfo.length.should.be.eq(6)
+        it('should correctly calculate the rate in InitCrowdsale', async () => {
+          let statusInfo = await initCrowdsale.getCrowdsaleStatus.call(
+            storage.address, executionID
+          ).should.be.fulfilled
+          statusInfo.length.should.be.eq(6)
 
-        statusInfo[0].should.be.bignumber.eq(startPrices[2])
-        statusInfo[1].should.be.bignumber.eq(endPrices[2])
-        statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
-        statusInfo[3].toNumber().should.be.eq(duration)
-        statusInfo[4].toNumber().should.be.eq(1)
-        statusInfo[5].should.be.bignumber.eq(
-          sellCap.minus(
-            amounts[0].plus(amounts[1]).plus(amounts[2])
-              .times(unitPrice).div(expectedCurrentPrice).toFixed(0, 1)
+          statusInfo[0].should.be.bignumber.eq(startPrices[2])
+          statusInfo[1].should.be.bignumber.eq(endPrices[2])
+          statusInfo[2].should.be.bignumber.eq(expectedCurrentPrice)
+          statusInfo[3].toNumber().should.be.eq(duration)
+          statusInfo[4].toNumber().should.be.eq(1)
+          statusInfo[5].should.be.bignumber.eq(
+            sellCap.minus(
+              amounts[0].plus(amounts[1]).plus(amounts[2])
+                .times(unitPrice).div(expectedCurrentPrice).toFixed(0, 1)
+            )
           )
-        )
+        })
       })
     })
   })

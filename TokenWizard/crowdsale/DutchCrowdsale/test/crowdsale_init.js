@@ -1,5 +1,5 @@
 // Abstract storage contract
-let AbstractStorage = artifacts.require('./RegistryStorage')
+let AbstractStorage = artifacts.require('./AbstractStorage')
 // DutchCrowdsale
 let InitDutch = artifacts.require('./InitCrowdsale')
 let DutchBuy = artifacts.require('./CrowdsaleBuyTokens')
@@ -348,7 +348,6 @@ contract('#DutchCrowdsaleInit', function (accounts) {
 
     let invalidWallet = zeroAddress()
     let invalidInitCalldata
-    let invalidInitEvent
 
     beforeEach(async () => {
       startTime = getTime() + 3600 // Starts in 1 hour
@@ -359,44 +358,15 @@ contract('#DutchCrowdsaleInit', function (accounts) {
         duration, startTime, isWhitelisted, crowdsaleAdmin
       ).should.be.fulfilled
       invalidInitCalldata.should.not.be.eq('0x')
+    })
 
-      // Initialize an invalid sale
-      events = await storage.initAndFinalize(
+    it('should throw', async () => {
+      await storage.initAndFinalize(
         updater, true, initCrowdsale.address, invalidInitCalldata, [
           crowdsaleBuy.address, crowdsaleConsole.address, tokenConsole.address,
           tokenTransfer.address, tokenTransferFrom.address, tokenApprove.address
         ], { from: exec }
-      ).then((tx) => {
-        return tx.logs
-      })
-      events.should.not.eq(null)
-      events.length.should.be.eq(1)
-      invalidInitEvent = events[0]
-    })
-
-    context('when the team wallet address is 0', async () => {
-
-      it('should emit an ApplicationException event', async () => {
-        invalidInitEvent.event.should.be.eq('ApplicationException')
-      })
-
-      describe('the ApplicationException event', async () => {
-
-        it('should contain an indexed application address', async () => {
-          let appAddress = invalidInitEvent.args['application_address']
-          appAddress.should.be.eq(initCrowdsale.address)
-        })
-
-        it('should contain an indexed execution id of value 0', async () => {
-          let execID = invalidInitEvent.args['execution_id']
-          web3.toDecimal(execID).should.be.eq(0)
-        })
-
-        it('should contain an indexed error message', async () => {
-          let message = invalidInitEvent.args['message']
-          hexStrEquals(message, 'ImproperInitialization').should.be.eq(true)
-        })
-      })
+      ).should.not.be.fulfilled
     })
   })
 
@@ -404,51 +374,22 @@ contract('#DutchCrowdsaleInit', function (accounts) {
 
     let invalidStartTime = 0
     let invalidInitCalldata
-    let invalidInitEvent
 
     beforeEach(async () => {
-
-      // Get invalid init calldata
       invalidInitCalldata = await testUtils.init.call(
         teamWallet, totalSupply, sellCap, startPrice, endPrice,
         duration, invalidStartTime, isWhitelisted, crowdsaleAdmin
       ).should.be.fulfilled
       invalidInitCalldata.should.not.be.eq('0x')
+    })
 
-      // Initialize an invalid sale
-      events = await storage.initAndFinalize(
+    it('should throw', async () => {
+      await storage.initAndFinalize(
         updater, true, initCrowdsale.address, invalidInitCalldata, [
           crowdsaleBuy.address, crowdsaleConsole.address, tokenConsole.address,
           tokenTransfer.address, tokenTransferFrom.address, tokenApprove.address
         ], { from: exec }
-      ).then((tx) => {
-        return tx.logs
-      })
-      events.should.not.eq(null)
-      events.length.should.be.eq(1)
-      invalidInitEvent = events[0]
-    })
-
-    it('should emit an ApplicationException event', async () => {
-      invalidInitEvent.event.should.be.eq('ApplicationException')
-    })
-
-    describe('the ApplicationException event', async () => {
-
-      it('should contain an indexed application address', async () => {
-        let appAddress = invalidInitEvent.args['application_address']
-        appAddress.should.be.eq(initCrowdsale.address)
-      })
-
-      it('should contain an indexed execution id of value 0', async () => {
-        let execID = invalidInitEvent.args['execution_id']
-        web3.toDecimal(execID).should.be.eq(0)
-      })
-
-      it('should contain an indexed error message', async () => {
-        let message = invalidInitEvent.args['message']
-        hexStrEquals(message, 'ImproperInitialization').should.be.eq(true)
-      })
+      ).should.not.be.fulfilled
     })
   })
 
@@ -456,51 +397,23 @@ contract('#DutchCrowdsaleInit', function (accounts) {
 
     let invalidDuration = 0
     let invalidInitCalldata
-    let invalidInitEvent
 
     beforeEach(async () => {
-
       // Get invalid init calldata
       invalidInitCalldata = await testUtils.init.call(
         teamWallet, totalSupply, sellCap, startPrice, endPrice,
         invalidDuration, startTime, isWhitelisted, crowdsaleAdmin
       ).should.be.fulfilled
       invalidInitCalldata.should.not.be.eq('0x')
+    })
 
-      // Initialize an invalid sale
-      events = await storage.initAndFinalize(
+    it('should throw', async () => {
+      await storage.initAndFinalize(
         updater, true, initCrowdsale.address, invalidInitCalldata, [
           crowdsaleBuy.address, crowdsaleConsole.address, tokenConsole.address,
           tokenTransfer.address, tokenTransferFrom.address, tokenApprove.address
         ], { from: exec }
-      ).then((tx) => {
-        return tx.logs
-      })
-      events.should.not.eq(null)
-      events.length.should.be.eq(1)
-      invalidInitEvent = events[0]
-    })
-
-    it('should emit an ApplicationException event', async () => {
-      invalidInitEvent.event.should.be.eq('ApplicationException')
-    })
-
-    describe('the ApplicationException event', async () => {
-
-      it('should contain an indexed application address', async () => {
-        let appAddress = invalidInitEvent.args['application_address']
-        appAddress.should.be.eq(initCrowdsale.address)
-      })
-
-      it('should contain an indexed execution id of value 0', async () => {
-        let execID = invalidInitEvent.args['execution_id']
-        web3.toDecimal(execID).should.be.eq(0)
-      })
-
-      it('should contain an indexed error message', async () => {
-        let message = invalidInitEvent.args['message']
-        hexStrEquals(message, 'ImproperInitialization').should.be.eq(true)
-      })
+      ).should.not.be.fulfilled
     })
   })
 
@@ -508,7 +421,6 @@ contract('#DutchCrowdsaleInit', function (accounts) {
 
     let invalidSellCap = 0
     let invalidInitCalldata
-    let invalidInitEvent
 
     beforeEach(async () => {
       startTime = getTime() + 3600 // Starts in 1 hour
@@ -519,41 +431,15 @@ contract('#DutchCrowdsaleInit', function (accounts) {
         duration, startTime, isWhitelisted, crowdsaleAdmin
       ).should.be.fulfilled
       invalidInitCalldata.should.not.be.eq('0x')
+    })
 
-      // Initialize an invalid sale
-      events = await storage.initAndFinalize(
+    it('should throw', async () => {
+      await storage.initAndFinalize(
         updater, true, initCrowdsale.address, invalidInitCalldata, [
           crowdsaleBuy.address, crowdsaleConsole.address, tokenConsole.address,
           tokenTransfer.address, tokenTransferFrom.address, tokenApprove.address
         ], { from: exec }
-      ).then((tx) => {
-        return tx.logs
-      })
-      events.should.not.eq(null)
-      events.length.should.be.eq(1)
-      invalidInitEvent = events[0]
-    })
-
-    it('should emit an ApplicationException event', async () => {
-      invalidInitEvent.event.should.be.eq('ApplicationException')
-    })
-
-    describe('the ApplicationException event', async () => {
-
-      it('should contain an indexed application address', async () => {
-        let appAddress = invalidInitEvent.args['application_address']
-        appAddress.should.be.eq(initCrowdsale.address)
-      })
-
-      it('should contain an indexed execution id of value 0', async () => {
-        let execID = invalidInitEvent.args['execution_id']
-        web3.toDecimal(execID).should.be.eq(0)
-      })
-
-      it('should contain an indexed error message', async () => {
-        let message = invalidInitEvent.args['message']
-        hexStrEquals(message, 'ImproperInitialization').should.be.eq(true)
-      })
+      ).should.not.be.fulfilled
     })
   })
 
@@ -561,7 +447,6 @@ contract('#DutchCrowdsaleInit', function (accounts) {
 
     let invalidSellCap = totalSupply + 1
     let invalidInitCalldata
-    let invalidInitEvent
 
     beforeEach(async () => {
       startTime = getTime() + 3600 // Starts in 1 hour
@@ -572,41 +457,15 @@ contract('#DutchCrowdsaleInit', function (accounts) {
         duration, startTime, isWhitelisted, crowdsaleAdmin
       ).should.be.fulfilled
       invalidInitCalldata.should.not.be.eq('0x')
+    })
 
-      // Initialize an invalid sale
-      events = await storage.initAndFinalize(
+    it('should throw', async () => {
+      await storage.initAndFinalize(
         updater, true, initCrowdsale.address, invalidInitCalldata, [
           crowdsaleBuy.address, crowdsaleConsole.address, tokenConsole.address,
           tokenTransfer.address, tokenTransferFrom.address, tokenApprove.address
         ], { from: exec }
-      ).then((tx) => {
-        return tx.logs
-      })
-      events.should.not.eq(null)
-      events.length.should.be.eq(1)
-      invalidInitEvent = events[0]
-    })
-
-    it('should emit an ApplicationException event', async () => {
-      invalidInitEvent.event.should.be.eq('ApplicationException')
-    })
-
-    describe('the ApplicationException event', async () => {
-
-      it('should contain an indexed application address', async () => {
-        let appAddress = invalidInitEvent.args['application_address']
-        appAddress.should.be.eq(initCrowdsale.address)
-      })
-
-      it('should contain an indexed execution id of value 0', async () => {
-        let execID = invalidInitEvent.args['execution_id']
-        web3.toDecimal(execID).should.be.eq(0)
-      })
-
-      it('should contain an indexed error message', async () => {
-        let message = invalidInitEvent.args['message']
-        hexStrEquals(message, 'ImproperInitialization').should.be.eq(true)
-      })
+      ).should.not.be.fulfilled
     })
   })
 
@@ -614,7 +473,6 @@ contract('#DutchCrowdsaleInit', function (accounts) {
 
     let invalidPrice = 0
     let invalidInitCalldata
-    let invalidInitEvent
 
     beforeEach(async () => {
       startTime = getTime() + 3600 // Starts in 1 hour
@@ -625,41 +483,15 @@ contract('#DutchCrowdsaleInit', function (accounts) {
         duration, startTime, isWhitelisted, crowdsaleAdmin
       ).should.be.fulfilled
       invalidInitCalldata.should.not.be.eq('0x')
+    })
 
-      // Initialize an invalid sale
-      events = await storage.initAndFinalize(
+    it('should throw', async () => {
+      await storage.initAndFinalize(
         updater, true, initCrowdsale.address, invalidInitCalldata, [
           crowdsaleBuy.address, crowdsaleConsole.address, tokenConsole.address,
           tokenTransfer.address, tokenTransferFrom.address, tokenApprove.address
         ], { from: exec }
-      ).then((tx) => {
-        return tx.logs
-      })
-      events.should.not.eq(null)
-      events.length.should.be.eq(1)
-      invalidInitEvent = events[0]
-    })
-
-    it('should emit an ApplicationException event', async () => {
-      invalidInitEvent.event.should.be.eq('ApplicationException')
-    })
-
-    describe('the ApplicationException event', async () => {
-
-      it('should contain an indexed application address', async () => {
-        let appAddress = invalidInitEvent.args['application_address']
-        appAddress.should.be.eq(initCrowdsale.address)
-      })
-
-      it('should contain an indexed execution id of value 0', async () => {
-        let execID = invalidInitEvent.args['execution_id']
-        web3.toDecimal(execID).should.be.eq(0)
-      })
-
-      it('should contain an indexed error message', async () => {
-        let message = invalidInitEvent.args['message']
-        hexStrEquals(message, 'ImproperInitialization').should.be.eq(true)
-      })
+      ).should.not.be.fulfilled
     })
   })
 
@@ -667,7 +499,6 @@ contract('#DutchCrowdsaleInit', function (accounts) {
 
     let invalidPrice = endPrice - 1
     let invalidInitCalldata
-    let invalidInitEvent
 
     beforeEach(async () => {
       startTime = getTime() + 3600 // Starts in 1 hour
@@ -678,41 +509,15 @@ contract('#DutchCrowdsaleInit', function (accounts) {
         duration, startTime, isWhitelisted, crowdsaleAdmin
       ).should.be.fulfilled
       invalidInitCalldata.should.not.be.eq('0x')
+    })
 
-      // Initialize an invalid sale
-      events = await storage.initAndFinalize(
+    it('should throw', async () => {
+      await storage.initAndFinalize(
         updater, true, initCrowdsale.address, invalidInitCalldata, [
           crowdsaleBuy.address, crowdsaleConsole.address, tokenConsole.address,
           tokenTransfer.address, tokenTransferFrom.address, tokenApprove.address
         ], { from: exec }
-      ).then((tx) => {
-        return tx.logs
-      })
-      events.should.not.eq(null)
-      events.length.should.be.eq(1)
-      invalidInitEvent = events[0]
-    })
-
-    it('should emit an ApplicationException event', async () => {
-      invalidInitEvent.event.should.be.eq('ApplicationException')
-    })
-
-    describe('the ApplicationException event', async () => {
-
-      it('should contain an indexed application address', async () => {
-        let appAddress = invalidInitEvent.args['application_address']
-        appAddress.should.be.eq(initCrowdsale.address)
-      })
-
-      it('should contain an indexed execution id of value 0', async () => {
-        let execID = invalidInitEvent.args['execution_id']
-        web3.toDecimal(execID).should.be.eq(0)
-      })
-
-      it('should contain an indexed error message', async () => {
-        let message = invalidInitEvent.args['message']
-        hexStrEquals(message, 'ImproperInitialization').should.be.eq(true)
-      })
+      ).should.not.be.fulfilled
     })
   })
 
@@ -720,7 +525,6 @@ contract('#DutchCrowdsaleInit', function (accounts) {
 
     let invalidPrice = endPrice
     let invalidInitCalldata
-    let invalidInitEvent
 
     beforeEach(async () => {
       startTime = getTime() + 3600 // Starts in 1 hour
@@ -731,41 +535,15 @@ contract('#DutchCrowdsaleInit', function (accounts) {
         duration, startTime, isWhitelisted, crowdsaleAdmin
       ).should.be.fulfilled
       invalidInitCalldata.should.not.be.eq('0x')
+    })
 
-      // Initialize an invalid sale
-      events = await storage.initAndFinalize(
+    it('should throw', async () => {
+      await storage.initAndFinalize(
         updater, true, initCrowdsale.address, invalidInitCalldata, [
           crowdsaleBuy.address, crowdsaleConsole.address, tokenConsole.address,
           tokenTransfer.address, tokenTransferFrom.address, tokenApprove.address
         ], { from: exec }
-      ).then((tx) => {
-        return tx.logs
-      })
-      events.should.not.eq(null)
-      events.length.should.be.eq(1)
-      invalidInitEvent = events[0]
-    })
-
-    it('should emit an ApplicationException event', async () => {
-      invalidInitEvent.event.should.be.eq('ApplicationException')
-    })
-
-    describe('the ApplicationException event', async () => {
-
-      it('should contain an indexed application address', async () => {
-        let appAddress = invalidInitEvent.args['application_address']
-        appAddress.should.be.eq(initCrowdsale.address)
-      })
-
-      it('should contain an indexed execution id of value 0', async () => {
-        let execID = invalidInitEvent.args['execution_id']
-        web3.toDecimal(execID).should.be.eq(0)
-      })
-
-      it('should contain an indexed error message', async () => {
-        let message = invalidInitEvent.args['message']
-        hexStrEquals(message, 'ImproperInitialization').should.be.eq(true)
-      })
+      ).should.not.be.fulfilled
     })
   })
 
@@ -773,7 +551,6 @@ contract('#DutchCrowdsaleInit', function (accounts) {
 
     let invalidPrice = 0
     let invalidInitCalldata
-    let invalidInitEvent
 
     beforeEach(async () => {
       startTime = getTime() + 3600 // Starts in 1 hour
@@ -784,41 +561,15 @@ contract('#DutchCrowdsaleInit', function (accounts) {
         duration, startTime, isWhitelisted, crowdsaleAdmin
       ).should.be.fulfilled
       invalidInitCalldata.should.not.be.eq('0x')
+    })
 
-      // Initialize an invalid sale
-      events = await storage.initAndFinalize(
+    it('should throw', async () => {
+      await storage.initAndFinalize(
         updater, true, initCrowdsale.address, invalidInitCalldata, [
           crowdsaleBuy.address, crowdsaleConsole.address, tokenConsole.address,
           tokenTransfer.address, tokenTransferFrom.address, tokenApprove.address
         ], { from: exec }
-      ).then((tx) => {
-        return tx.logs
-      })
-      events.should.not.eq(null)
-      events.length.should.be.eq(1)
-      invalidInitEvent = events[0]
-    })
-
-    it('should emit an ApplicationException event', async () => {
-      invalidInitEvent.event.should.be.eq('ApplicationException')
-    })
-
-    describe('the ApplicationException event', async () => {
-
-      it('should contain an indexed application address', async () => {
-        let appAddress = invalidInitEvent.args['application_address']
-        appAddress.should.be.eq(initCrowdsale.address)
-      })
-
-      it('should contain an indexed execution id of value 0', async () => {
-        let execID = invalidInitEvent.args['execution_id']
-        web3.toDecimal(execID).should.be.eq(0)
-      })
-
-      it('should contain an indexed error message', async () => {
-        let message = invalidInitEvent.args['message']
-        hexStrEquals(message, 'ImproperInitialization').should.be.eq(true)
-      })
+      ).should.not.be.fulfilled
     })
   })
 
@@ -826,7 +577,6 @@ contract('#DutchCrowdsaleInit', function (accounts) {
 
     let invalidPrice = startPrice + 1
     let invalidInitCalldata
-    let invalidInitEvent
 
     beforeEach(async () => {
       startTime = getTime() + 3600 // Starts in 1 hour
@@ -837,41 +587,15 @@ contract('#DutchCrowdsaleInit', function (accounts) {
         duration, startTime, isWhitelisted, crowdsaleAdmin
       ).should.be.fulfilled
       invalidInitCalldata.should.not.be.eq('0x')
+    })
 
-      // Initialize an invalid sale
-      events = await storage.initAndFinalize(
+    it('should throw', async () => {
+      await storage.initAndFinalize(
         updater, true, initCrowdsale.address, invalidInitCalldata, [
           crowdsaleBuy.address, crowdsaleConsole.address, tokenConsole.address,
           tokenTransfer.address, tokenTransferFrom.address, tokenApprove.address
         ], { from: exec }
-      ).then((tx) => {
-        return tx.logs
-      })
-      events.should.not.eq(null)
-      events.length.should.be.eq(1)
-      invalidInitEvent = events[0]
-    })
-
-    it('should emit an ApplicationException event', async () => {
-      invalidInitEvent.event.should.be.eq('ApplicationException')
-    })
-
-    describe('the ApplicationException event', async () => {
-
-      it('should contain an indexed application address', async () => {
-        let appAddress = invalidInitEvent.args['application_address']
-        appAddress.should.be.eq(initCrowdsale.address)
-      })
-
-      it('should contain an indexed execution id of value 0', async () => {
-        let execID = invalidInitEvent.args['execution_id']
-        web3.toDecimal(execID).should.be.eq(0)
-      })
-
-      it('should contain an indexed error message', async () => {
-        let message = invalidInitEvent.args['message']
-        hexStrEquals(message, 'ImproperInitialization').should.be.eq(true)
-      })
+      ).should.not.be.fulfilled
     })
   })
 
@@ -879,7 +603,6 @@ contract('#DutchCrowdsaleInit', function (accounts) {
 
     let invalidPrice = startPrice
     let invalidInitCalldata
-    let invalidInitEvent
 
     beforeEach(async () => {
       startTime = getTime() + 3600 // Starts in 1 hour
@@ -890,41 +613,15 @@ contract('#DutchCrowdsaleInit', function (accounts) {
         duration, startTime, isWhitelisted, crowdsaleAdmin
       ).should.be.fulfilled
       invalidInitCalldata.should.not.be.eq('0x')
+    })
 
-      // Initialize an invalid sale
-      events = await storage.initAndFinalize(
+    it('should throw', async () => {
+      await storage.initAndFinalize(
         updater, true, initCrowdsale.address, invalidInitCalldata, [
           crowdsaleBuy.address, crowdsaleConsole.address, tokenConsole.address,
           tokenTransfer.address, tokenTransferFrom.address, tokenApprove.address
         ], { from: exec }
-      ).then((tx) => {
-        return tx.logs
-      })
-      events.should.not.eq(null)
-      events.length.should.be.eq(1)
-      invalidInitEvent = events[0]
-    })
-
-    it('should emit an ApplicationException event', async () => {
-      invalidInitEvent.event.should.be.eq('ApplicationException')
-    })
-
-    describe('the ApplicationException event', async () => {
-
-      it('should contain an indexed application address', async () => {
-        let appAddress = invalidInitEvent.args['application_address']
-        appAddress.should.be.eq(initCrowdsale.address)
-      })
-
-      it('should contain an indexed execution id of value 0', async () => {
-        let execID = invalidInitEvent.args['execution_id']
-        web3.toDecimal(execID).should.be.eq(0)
-      })
-
-      it('should contain an indexed error message', async () => {
-        let message = invalidInitEvent.args['message']
-        hexStrEquals(message, 'ImproperInitialization').should.be.eq(true)
-      })
+      ).should.not.be.fulfilled
     })
   })
 
@@ -932,7 +629,6 @@ contract('#DutchCrowdsaleInit', function (accounts) {
 
     let invalidAdmin = zeroAddress()
     let invalidInitCalldata
-    let invalidInitEvent
 
     beforeEach(async () => {
       startTime = getTime() + 3600 // Starts in 1 hour
@@ -943,41 +639,15 @@ contract('#DutchCrowdsaleInit', function (accounts) {
         duration, startTime, isWhitelisted, invalidAdmin
       ).should.be.fulfilled
       invalidInitCalldata.should.not.be.eq('0x')
+    })
 
-      // Initialize an invalid sale
-      events = await storage.initAndFinalize(
+    it('should throw', async () => {
+      await storage.initAndFinalize(
         updater, true, initCrowdsale.address, invalidInitCalldata, [
           crowdsaleBuy.address, crowdsaleConsole.address, tokenConsole.address,
           tokenTransfer.address, tokenTransferFrom.address, tokenApprove.address
         ], { from: exec }
-      ).then((tx) => {
-        return tx.logs
-      })
-      events.should.not.eq(null)
-      events.length.should.be.eq(1)
-      invalidInitEvent = events[0]
-    })
-
-    it('should emit an ApplicationException event', async () => {
-      invalidInitEvent.event.should.be.eq('ApplicationException')
-    })
-
-    describe('the ApplicationException event', async () => {
-
-      it('should contain an indexed application address', async () => {
-        let appAddress = invalidInitEvent.args['application_address']
-        appAddress.should.be.eq(initCrowdsale.address)
-      })
-
-      it('should contain an indexed execution id of value 0', async () => {
-        let execID = invalidInitEvent.args['execution_id']
-        web3.toDecimal(execID).should.be.eq(0)
-      })
-
-      it('should contain an indexed error message', async () => {
-        let message = invalidInitEvent.args['message']
-        hexStrEquals(message, 'ImproperInitialization').should.be.eq(true)
-      })
+      ).should.not.be.fulfilled
     })
   })
 })
