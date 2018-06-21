@@ -1,0 +1,6 @@
+[submodule "TokenWizard/crowdsale/MintedCappedCrowdsale/authos-solidity"]
+	path = TokenWizard/crowdsale/MintedCappedCrowdsale/authos-solidity
+	url = git@github.com:auth-os/core
+[submodule "TokenWizard/crowdsale/DutchCrowdsale/authos-solidity"]
+	path = TokenWizard/crowdsale/DutchCrowdsale/authos-solidity
+	url = git@github.com:auth-os/core
