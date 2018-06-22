@@ -122,9 +122,9 @@ contract('MintedCappedCrowdsale', function (accounts) {
     const addrSuffix = '_ADDRESS'
     let envVarsContent = ''
     envVarsContent += `${reactAppPrefix}ABSTRACT_STORAGE${addrSuffix}='{"${networkID}":"${storage.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}APP_REGISTRY_IDX${addrSuffix}='{"${networkID}":"${regIdx.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}APP_PROVIDER${addrSuffix}='{"${networkID}":"${regProvider.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}APP_REGISTRY_EXEC${addrSuffix}='{"${networkID}":"${scriptExec.address}"}'\n`
+    envVarsContent += `${reactAppPrefix}REGISTRY_IDX${addrSuffix}='{"${networkID}":"${regIdx.address}"}'\n`
+    envVarsContent += `${reactAppPrefix}PROVIDER${addrSuffix}='{"${networkID}":"${regProvider.address}"}'\n`
+    envVarsContent += `${reactAppPrefix}REGISTRY_EXEC${addrSuffix}='{"${networkID}":"${scriptExec.address}"}'\n`
     envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}IDX${addrSuffix}='{"${networkID}":"${saleIdx.address}"}'\n`
     envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}CROWDSALE${addrSuffix}='{"${networkID}":"${sale.address}"}'\n`
     envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}CROWDSALE_MANAGER${addrSuffix}='{"${networkID}":"${saleManager.address}"}'\n`
