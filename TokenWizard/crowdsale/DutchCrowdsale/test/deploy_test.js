@@ -109,38 +109,9 @@ contract('DutchCrowdsale', function (accounts) {
     defaultStorage.should.be.eq(storage.address)
     defaultRegistryExecID.should.be.eq(regExecID)
     defaultProvider.should.be.eq(exec)
-
-    //generates .env variables:
-    const reactAppPrefix = 'REACT_APP_'
-    const mintedCappedPrefix = 'MINTED_CAPPED_'
-    const dutchPrefix = 'DUTCH_'
-    const addrSuffix = '_ADDRESS'
-    let envVarsContent = ''
-    envVarsContent += `${reactAppPrefix}ABSTRACT_STORAGE${addrSuffix}='{"${networkID}":"${storage.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}REGISTRY_IDX${addrSuffix}='{"${networkID}":"${regIdx.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}PROVIDER${addrSuffix}='{"${networkID}":"${regProvider.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}REGISTRY_EXEC${addrSuffix}='{"${networkID}":"${scriptExec.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}IDX${addrSuffix}='{"${networkID}":"0x0"}'\n`
-    envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}CROWDSALE${addrSuffix}='{"${networkID}":"0x0"}'\n`
-    envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}CROWDSALE_MANAGER${addrSuffix}='{"${networkID}":"0x0"}'\n`
-    envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}TOKEN${addrSuffix}='{"${networkID}":"0x0"}'\n`
-    envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}TOKEN_MANAGER${addrSuffix}='{"${networkID}":"0x0"}'\n`
-    envVarsContent += `${reactAppPrefix}${dutchPrefix}IDX${addrSuffix}='{"${networkID}":"${saleIdx.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}${dutchPrefix}CROWDSALE${addrSuffix}='{"${networkID}":"${sale.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}${dutchPrefix}CROWDSALE_MANAGER${addrSuffix}='{"${networkID}":"0x0"}'\n`
-    envVarsContent += `${reactAppPrefix}${dutchPrefix}TOKEN${addrSuffix}='{"${networkID}":"${token.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}${dutchPrefix}TOKEN_MANAGER${addrSuffix}='{"${networkID}":"0x0"}'\n`
-    envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}APP_NAME='MintedCappedCrowdsale'\n`
-    envVarsContent += `${reactAppPrefix}${dutchPrefix}APP_NAME='DutchCrowdsale'\n`
-    envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}APP_NAME_HASH='0x4d696e74656443617070656443726f776473616c650000000000000000000000'\n`
-    envVarsContent += `${reactAppPrefix}${dutchPrefix}APP_NAME_HASH='0x447574636843726f776473616c65000000000000000000000000000000000000'\n`
-    envVarsContent += `${reactAppPrefix}INFURA_TOKEN='kEpzZR9fIyO3a8gTqJcI'\n`
-    console.log("envVarsContent:")
-    console.log(envVarsContent)
-    fs.writeFileSync("./.env", envVarsContent)
   })
 
-  context('crowdsale application registration', async () => {
+  it.only('crowdsale application registration', async () => {
 
     let registerAppCalldata
 
