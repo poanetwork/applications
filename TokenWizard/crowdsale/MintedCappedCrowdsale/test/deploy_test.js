@@ -2,7 +2,7 @@ let fs = require('fs')
 
 // Abstract storage contract
 let AbstractStorage = artifacts.require('./AbstractStorage')
-let ScriptExec = artifacts.require('./ScriptExec')
+let ScriptExec = artifacts.require('./RegistryExec')
 // MintedCappedCrowdsale
 let Token = artifacts.require('./Token')
 let Sale = artifacts.require('./Sale')

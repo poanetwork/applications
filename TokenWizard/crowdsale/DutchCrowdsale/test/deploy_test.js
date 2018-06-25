@@ -1,7 +1,7 @@
 let fs = require('fs')
 
 // Script exec and storage contracts
-let ScriptExec = artifacts.require('./ScriptExec')
+let ScriptExec = artifacts.require('./RegistryExec')
 let AbstractStorage = artifacts.require('./AbstractStorage')
 // Registry
 let RegistryUtil = artifacts.require('./RegistryUtil')

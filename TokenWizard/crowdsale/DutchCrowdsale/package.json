@@ -1,19 +1,17 @@
 {
-  "name": "dutchcrowdsale",
-  "version": "1.0.0",
-  "description": "",
-  "directories": {
-    "test": "test"
-  },
-  "dependencies": {
-    "chai": "^4.1.2",
-    "chai-as-promised": "^7.1.1",
-    "chai-bignumber": "^2.0.2"
-  },
-  "devDependencies": {},
+  "name": "DutchCrowdsale",
+  "version": "0.0.9",
+  "private": "yes",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "./node_modules/.bin/truffle test"
   },
-  "author": "",
-  "license": "ISC"
+  "files": [
+    "contracts",
+    "test",
+    "truffle.js",
+    "truffle-config.js"
+  ],
+  "dependencies": {
+    "authos-solidity": "^1.0.4"
+  }
 }
