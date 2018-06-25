@@ -161,7 +161,7 @@ contract('DutchCrowdsale', function (accounts) {
       events[0].event.should.be.eq('ApplicationExecution')
     })
 
-    describe('#getLatestVersion', async () => {
+    describe.only('#getLatestVersion', async () => {
 
       let appLatest
 
@@ -176,7 +176,7 @@ contract('DutchCrowdsale', function (accounts) {
       })
     })
 
-    describe('#getVersionImplementation', async () => {
+    describe.only('#getVersionImplementation', async () => {
 
       let verImpl
 

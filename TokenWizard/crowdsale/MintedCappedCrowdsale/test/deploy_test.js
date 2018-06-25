@@ -166,7 +166,7 @@ contract('MintedCappedCrowdsale', function (accounts) {
       events[0].event.should.be.eq('ApplicationExecution')
     })
 
-    describe('#getLatestVersion', async () => {
+    describe.only('#getLatestVersion', async () => {
 
       let appLatest
 
@@ -181,7 +181,7 @@ contract('MintedCappedCrowdsale', function (accounts) {
       })
     })
 
-    describe('#getVersionImplementation', async () => {
+    describe.only('#getVersionImplementation', async () => {
 
       let verImpl
 
