@@ -1,5 +1,3 @@
-let fs = require('fs')
-
 // Script exec and storage contracts
 let ScriptExec = artifacts.require('./RegistryExec')
 let AbstractStorage = artifacts.require('./AbstractStorage')
@@ -28,7 +26,6 @@ contract('DutchCrowdsale', function (accounts) {
 
   let storage
   let scriptExec
-  let networkID
 
   let exec = accounts[0]
   let execAdmin = accounts[1]
@@ -96,10 +93,9 @@ contract('DutchCrowdsale', function (accounts) {
       { from: execAdmin }
     ).should.be.fulfilled
     await scriptExec.setRegistryExecID(regExecID, { from: execAdmin }).should.be.fulfilled
-    networkID = await web3.version.network
   })
 
-  it.only('should correctly set up script exec', async () => {
+  it('should correctly set up script exec', async () => {
     let storedAdmin = await scriptExec.exec_admin.call().should.be.fulfilled
     let defaultStorage = await scriptExec.app_storage.call().should.be.fulfilled
     let defaultRegistryExecID = await scriptExec.registry_exec_id.call().should.be.fulfilled
@@ -111,7 +107,7 @@ contract('DutchCrowdsale', function (accounts) {
     defaultProvider.should.be.eq(exec)
   })
 
-  it.only('crowdsale application registration', async () => {
+  context('crowdsale application registration', async () => {
 
     let registerAppCalldata
 
@@ -132,7 +128,7 @@ contract('DutchCrowdsale', function (accounts) {
       events[0].event.should.be.eq('ApplicationExecution')
     })
 
-    describe.only('#getLatestVersion', async () => {
+    describe('#getLatestVersion', async () => {
 
       let appLatest
 
@@ -147,7 +143,7 @@ contract('DutchCrowdsale', function (accounts) {
       })
     })
 
-    describe.only('#getVersionImplementation', async () => {
+    describe('#getVersionImplementation', async () => {
 
       let verImpl
 
