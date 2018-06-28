@@ -127,9 +127,7 @@ contract('DutchCrowdsale', function (accounts) {
     envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}TOKEN_MANAGER${addrSuffix}='{"${networkID}":"0x0"}'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}IDX${addrSuffix}='{"${networkID}":"${saleIdx.address}"}'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}CROWDSALE${addrSuffix}='{"${networkID}":"${sale.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}${dutchPrefix}CROWDSALE_MANAGER${addrSuffix}='{"${networkID}":"0x0"}'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}TOKEN${addrSuffix}='{"${networkID}":"${token.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}${dutchPrefix}TOKEN_MANAGER${addrSuffix}='{"${networkID}":"0x0"}'\n`
     envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}APP_NAME='MintedCappedCrowdsale'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}APP_NAME='DutchCrowdsale'\n`
     envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}APP_NAME_HASH='0x4d696e74656443617070656443726f776473616c650000000000000000000000'\n`
