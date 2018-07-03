@@ -13,5 +13,8 @@
   ],
   "dependencies": {
     "authos-solidity": "^1.0.4"
+  },
+  "devDependencies": {
+    "truffle-flattener": "^1.2.5"
   }
 }
