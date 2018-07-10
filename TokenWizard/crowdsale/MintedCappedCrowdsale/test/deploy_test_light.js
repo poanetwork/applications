@@ -141,8 +141,8 @@ contract('MintedCappedCrowdsale', function (accounts) {
     envVarsContent += `${reactAppPrefix}${dutchPrefix}IDX${addrSuffix}='{"${networkID}":"0x0"}'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}CROWDSALE${addrSuffix}='{"${networkID}":"0x0"}'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}TOKEN${addrSuffix}='{"${networkID}":"0x0"}'\n`
-    envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}TW_PROXIES_REGISTRY${addrSuffix}='{"${networkID}":"${proxiesRegistry.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}PROXY_PROVIDER${addrSuffix}='{"${networkID}":"${execAdmin}"}'\n`
+    envVarsContent += `${reactAppPrefix}TW_PROXIES_REGISTRY${addrSuffix}='{"${networkID}":"${proxiesRegistry.address}"}'\n`
+    envVarsContent += `${reactAppPrefix}PROXY_PROVIDER${addrSuffix}='{"${networkID}":"${execAdmin}"}'\n`
     envVarsContent += `${reactAppPrefix}REGISTRY_EXEC_ID='${regExecID}'\n`
     envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}APP_NAME='MintedCappedCrowdsale'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}APP_NAME='DutchCrowdsale'\n`
