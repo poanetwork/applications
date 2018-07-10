@@ -58,7 +58,7 @@ contract TokenWizardProxiesRegistry is Ownable {
     bytes32 appExecID = proxy.app_exec_id();
     AbstractIdx mintedCappedIdx = AbstractIdx(mintedCappedIdxAddr);
     AbstractIdx dutchIdx = AbstractIdx(dutchIdxAddr);
-    require(mintedCappedIdx.getAdmin(abstractStorageAddr, appExecID) != address(0) || dutchIdx.getAdmin(abstractStorageAddr, appExecID) != address(0));
+    require(mintedCappedIdx.getAdmin(abstractStorageAddr, appExecID) == msg.sender || dutchIdx.getAdmin(abstractStorageAddr, appExecID) == msg.sender);
     for (uint i = 0; i < deployedCrowdsalesByUser[msg.sender].length; i++) {
         require(deployedCrowdsalesByUser[msg.sender][i].proxyAddress != proxyAddress);
         require(deployedCrowdsalesByUser[msg.sender][i].execID != appExecID);

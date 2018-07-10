@@ -107,7 +107,7 @@ contract('MintedCappedCrowdsale', function (accounts) {
     await scriptExec.setRegistryExecID(regExecID, { from: execAdmin }).should.be.fulfilled
 
     //deploy proxies registry
-    proxiesRegistry = await ProxiesRegistry.new(storage.address, '0x1', saleIdx.address).should.be.fulfilled
+    proxiesRegistry = await ProxiesRegistry.new(storage.address, saleIdx.address, '0x1').should.be.fulfilled
 
     networkID = await web3.version.network
   })
