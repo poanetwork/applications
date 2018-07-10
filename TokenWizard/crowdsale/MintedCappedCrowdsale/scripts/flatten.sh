@@ -5,3 +5,4 @@ rm -rf ../flats/*
 ../node_modules/.bin/truffle-flattener ../contracts/classes/token_manager/TokenManager.sol > ../flats/TokenManager.sol
 ../node_modules/.bin/truffle-flattener ../contracts/MintedCappedIdx.sol > ../flats/MintedCappedIdx.sol
 ../node_modules/.bin/truffle-flattener ../contracts/MintedCappedProxy.sol > ../flats/MintedCappedProxy.sol
+../node_modules/.bin/truffle-flattener ../contracts/ProxiesRegistry.sol > ../flats/ProxiesRegistry.sol
