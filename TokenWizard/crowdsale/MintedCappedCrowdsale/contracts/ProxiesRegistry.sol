@@ -72,9 +72,9 @@ contract TokenWizardProxiesRegistry is Ownable {
   }
   
   function getCrowdsalesForUser(address deployer) public view returns (address[]) {
-      address[] storage proxies;
+      address[] memory proxies = new address[](deployedCrowdsalesByUser[deployer].length);
       for (uint k = 0; k < deployedCrowdsalesByUser[deployer].length; k++) {
-          proxies.push(deployedCrowdsalesByUser[deployer][k].proxyAddress);
+          proxies[k] = deployedCrowdsalesByUser[deployer][k].proxyAddress;
       }
       return proxies;
   }
