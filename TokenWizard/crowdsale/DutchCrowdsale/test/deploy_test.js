@@ -13,6 +13,8 @@ let DutchSale = artifacts.require('./DutchCrowdsaleIdx')
 // Utils
 let DutchUtils = artifacts.require('./utils/DutchUtils')
 
+let ProxiesRegistry = artifacts.require('./TokenWizardProxiesRegistry')
+
 function hexStrEquals(hex, expected) {
   return web3.toAscii(hex).substring(0, expected.length) == expected;
 }
@@ -43,6 +45,8 @@ contract('DutchCrowdsale', function (accounts) {
   let token
   let sale
   let admin
+
+  let proxiesRegistry
 
   let appName = 'DutchCrowdsale'
 
@@ -93,6 +97,9 @@ contract('DutchCrowdsale', function (accounts) {
       { from: execAdmin }
     ).should.be.fulfilled
     await scriptExec.setRegistryExecID(regExecID, { from: execAdmin }).should.be.fulfilled
+
+    //deploy proxies registry
+    proxiesRegistry = await ProxiesRegistry.new(storage.address, '0x1', saleIdx.address).should.be.fulfilled
   })
 
   it('should correctly set up script exec', async () => {

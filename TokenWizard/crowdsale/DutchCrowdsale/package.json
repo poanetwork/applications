@@ -12,6 +12,10 @@
     "truffle-config.js"
   ],
   "dependencies": {
-    "authos-solidity": "^1.0.4"
+    "authos-solidity": "^1.0.4",
+    "openzeppelin-solidity": "^1.10.0"
+  },
+  "devDependencies": {
+    "truffle-flattener": "^1.2.5"
   }
 }

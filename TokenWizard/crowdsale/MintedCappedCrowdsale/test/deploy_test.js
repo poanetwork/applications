@@ -14,6 +14,8 @@ let Provider = artifacts.require('./Provider')
 // Util
 let MintedCappedUtils = artifacts.require('./MintedCappedUtils')
 
+let ProxiesRegistry = artifacts.require('./TokenWizardProxiesRegistry')
+
 function hexStrEquals(hex, expected) {
   return web3.toAscii(hex).substring(0, expected.length) == expected;
 }
@@ -45,6 +47,8 @@ contract('MintedCappedCrowdsale', function (accounts) {
   let sale
   let tokenManager
   let saleManager
+
+  let proxiesRegistry
 
   let appName = 'MintedCappedCrowdsale'
   let verName = 'v0.0.1'
@@ -98,6 +102,9 @@ contract('MintedCappedCrowdsale', function (accounts) {
       { from: execAdmin }
     ).should.be.fulfilled
     await scriptExec.setRegistryExecID(regExecID, { from: execAdmin }).should.be.fulfilled
+
+    //deploy proxies registry
+    proxiesRegistry = await ProxiesRegistry.new(storage.address, saleIdx.address, '0x1').should.be.fulfilled
   })
 
   it('should correctly set up script exec', async () => {
