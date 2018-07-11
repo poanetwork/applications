@@ -102,7 +102,7 @@ contract('DutchCrowdsale', function (accounts) {
     await scriptExec.setRegistryExecID(regExecID, { from: execAdmin }).should.be.fulfilled
     
     //deploy proxies registry
-    saleIdxMock = await DutchSale.new().should.be.fulfilled
+    let saleIdxMock = await DutchSale.new().should.be.fulfilled
     proxiesRegistry = await ProxiesRegistry.new(storage.address, saleIdxMock.address, saleIdx.address).should.be.fulfilled
 
     networkID = await web3.version.network
