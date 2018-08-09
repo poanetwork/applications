@@ -350,7 +350,7 @@ contract('#MintedCappedSaleManager', function (accounts) {
             })
 
             it('should have an empty data field', async () => {
-              web3.toDecimal(eventData).should.be.eq(0)
+              web3.toDecimal(eventData).should.be.eq(web3.toDecimal(0))
             })
           })
 
