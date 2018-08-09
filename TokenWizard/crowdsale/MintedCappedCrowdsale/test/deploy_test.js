@@ -104,7 +104,7 @@ contract('MintedCappedCrowdsale', function (accounts) {
     await scriptExec.setRegistryExecID(regExecID, { from: execAdmin }).should.be.fulfilled
 
     //deploy proxies registry
-    let saleIdxMock = await DutchSale.new().should.be.fulfilled
+    let saleIdxMock = await MintedCapped.new().should.be.fulfilled
     proxiesRegistry = await ProxiesRegistry.new(storage.address, saleIdx.address, saleIdxMock.address).should.be.fulfilled
   })
 
