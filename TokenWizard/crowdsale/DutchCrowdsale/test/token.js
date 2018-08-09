@@ -341,7 +341,7 @@ contract('#LockableToken', function (accounts) {
             })
 
             it('should have an empty data field', async () => {
-              eventData.should.be.eq('0x00')
+              web3.toDecimal(eventData).should.be.eq(0)
             })
           })
 
@@ -420,6 +420,25 @@ contract('#LockableToken', function (accounts) {
         beforeEach(async () => {
           invalidCalldata = await saleUtils.transfer.call(
             invalidRecipient, stdBalance / 2
+          ).should.be.fulfilled
+          invalidCalldata.should.not.eq('0x')
+        })
+
+        it('should throw', async () => {
+          await storage.exec(
+            senderAccount, executionID, invalidCalldata,
+            { from: exec }
+          ).should.not.be.fulfilled
+        })
+      })
+
+      context('when the recipient address is the sender', async () => {
+
+        let invalidCalldata
+
+        beforeEach(async () => {
+          invalidCalldata = await saleUtils.transfer.call(
+            senderAccount, stdBalance / 2
           ).should.be.fulfilled
           invalidCalldata.should.not.eq('0x')
         })
@@ -531,7 +550,7 @@ contract('#LockableToken', function (accounts) {
               })
 
               it('should have an empty data field', async () => {
-                eventData.should.be.eq('0x00')
+                web3.toDecimal(eventData).should.be.eq(0)
               })
             })
 
@@ -694,7 +713,7 @@ contract('#LockableToken', function (accounts) {
           })
 
           it('should have an empty data field', async () => {
-            eventData.should.be.eq('0x00')
+            web3.toDecimal(eventData).should.be.eq(0)
           })
         })
 
@@ -815,7 +834,7 @@ contract('#LockableToken', function (accounts) {
           })
 
           it('should have an empty data field', async () => {
-            eventData.should.be.eq('0x00')
+            web3.toDecimal(eventData).should.be.eq(0)
           })
         })
 
@@ -962,7 +981,7 @@ contract('#LockableToken', function (accounts) {
             })
 
             it('should have an empty data field', async () => {
-              eventData.should.be.eq('0x00')
+              web3.toDecimal(eventData).should.be.eq(0)
             })
           })
 
@@ -1083,7 +1102,7 @@ contract('#LockableToken', function (accounts) {
             })
 
             it('should have an empty data field', async () => {
-              eventData.should.be.eq('0x00')
+              web3.toDecimal(eventData).should.be.eq(0)
             })
           })
 
@@ -1300,7 +1319,7 @@ contract('#LockableToken', function (accounts) {
             })
 
             it('should have an empty data field', async () => {
-              eventData.should.be.eq('0x00')
+              web3.toDecimal(eventData).should.be.eq(0)
             })
           })
 
@@ -1375,6 +1394,27 @@ contract('#LockableToken', function (accounts) {
         events.should.not.eq(null)
         events.length.should.be.eq(1)
         events[0].event.should.be.eq('ApplicationExecution')
+      })
+
+      context('when the recipient address is the same as the owner', async () => {
+
+        let invalidCalldata
+
+        let invalidAddress = ownerAccount
+
+        beforeEach(async () => {
+          invalidCalldata = await saleUtils.transferFrom.call(
+            ownerAccount, invalidAddress, 1
+          ).should.be.fulfilled
+          invalidCalldata.should.not.eq('0x')
+        })
+
+        it('should throw', async () => {
+          await storage.exec(
+            spenderAccount, executionID, invalidCalldata,
+            { from: exec }
+          ).should.not.be.fulfilled
+        })
       })
 
       context('when the recipient address is invalid', async () => {
@@ -1553,7 +1593,7 @@ contract('#LockableToken', function (accounts) {
                 })
 
                 it('should have an empty data field', async () => {
-                  eventData.should.be.eq('0x00')
+                  web3.toDecimal(eventData).should.be.eq(0)
                 })
               })
 
