@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="9d9aa08e-5912-4e32-b78a-071763377575" name="Default" comment="" />
+    <list default="true" id="9d9aa08e-5912-4e32-b78a-071763377575" name="Default" comment="">
+      <change beforePath="$PROJECT_DIR$/.gitignore" afterPath="$PROJECT_DIR$/.gitignore" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" afterPath="$PROJECT_DIR$/.idea/workspace.xml" />
+    </list>
     <ignored path="$PROJECT_DIR$/.tmp/" />
     <ignored path="$PROJECT_DIR$/temp/" />
     <ignored path="$PROJECT_DIR$/tmp/" />
@@ -14,29 +17,14 @@
   </component>
   <component name="FileEditorManager">
     <leaf>
-      <file leaf-file-name="sale.js" pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/sale.js">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="418">
-              <caret line="13354" column="0" lean-forward="true" selection-start-line="0" selection-start-column="0" selection-end-line="13354" selection-end-column="0" />
-              <folding>
-                <element signature="e#942#71347#0" expanded="false" />
-                <element signature="e#71426#145300#0" expanded="false" />
-                <element signature="e#145402#288986#0" expanded="false" />
-                <element signature="e#289089#481727#0" expanded="false" />
-              </folding>
-            </state>
-          </provider>
-        </entry>
-      </file>
       <file leaf-file-name="sale_various_price.js" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/sale_various_price.js">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="373">
-              <caret line="31" column="0" lean-forward="false" selection-start-line="31" selection-start-column="0" selection-end-line="31" selection-end-column="0" />
+            <state relative-caret-position="105">
+              <caret line="7" column="11" lean-forward="true" selection-start-line="7" selection-start-column="11" selection-end-line="7" selection-end-column="11" />
               <folding>
-                <element signature="e#957#128164#0" expanded="false" />
-                <element signature="e#128267#298272#0" expanded="false" />
+                <element signature="e#1115#128322#0" expanded="false" />
+                <element signature="e#128425#298430#0" expanded="false" />
               </folding>
             </state>
           </provider>
@@ -45,24 +33,33 @@
       <file leaf-file-name="sale_flat_price.js" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/sale_flat_price.js">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="418">
-              <caret line="2052" column="0" lean-forward="true" selection-start-line="2052" selection-start-column="0" selection-end-line="2052" selection-end-column="0" />
+            <state relative-caret-position="60">
+              <caret line="4" column="38" lean-forward="false" selection-start-line="4" selection-start-column="38" selection-end-line="4" selection-end-column="38" />
               <folding>
-                <element signature="e#934#66498#0" expanded="false" />
+                <element signature="e#1092#66656#0" expanded="false" />
               </folding>
             </state>
           </provider>
         </entry>
       </file>
-      <file leaf-file-name="sale_standart_price.js" pinned="false" current-in-tab="true">
+      <file leaf-file-name="sale_standart_price.js" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/sale_standart_price.js">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="478">
-              <caret line="13354" column="0" lean-forward="true" selection-start-line="13354" selection-start-column="0" selection-end-line="13354" selection-end-column="0" />
+            <state relative-caret-position="225">
+              <caret line="15" column="60" lean-forward="true" selection-start-line="15" selection-start-column="60" selection-end-line="15" selection-end-column="60" />
               <folding>
-                <element signature="e#256506#426511#0" expanded="false" />
-                <marker date="1534177894435" expanded="true" signature="405771:405775" ph="{...}" />
+                <element signature="e#1095#63609#0" expanded="false" />
               </folding>
+            </state>
+          </provider>
+        </entry>
+      </file>
+      <file leaf-file-name=".gitignore" pinned="false" current-in-tab="true">
+        <entry file="file://$PROJECT_DIR$/.gitignore">
+          <provider selected="true" editor-type-id="text-editor">
+            <state relative-caret-position="90">
+              <caret line="6" column="1" lean-forward="false" selection-start-line="6" selection-start-column="1" selection-end-line="6" selection-end-column="1" />
+              <folding />
             </state>
           </provider>
         </entry>
@@ -86,9 +83,11 @@
   <component name="IdeDocumentHistory">
     <option name="CHANGED_PATHS">
       <list>
+        <option value="$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/sale.js" />
         <option value="$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/sale_various_price.js" />
         <option value="$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/sale_flat_price.js" />
         <option value="$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/sale_standart_price.js" />
+        <option value="$PROJECT_DIR$/.gitignore" />
       </list>
     </option>
   </component>
@@ -168,14 +167,14 @@
               <item name="auth-os-applications" type="462c0819:PsiDirectoryNode" />
               <item name="TokenWizard" type="462c0819:PsiDirectoryNode" />
               <item name="crowdsale" type="462c0819:PsiDirectoryNode" />
-              <item name="DutchCrowdsale" type="462c0819:PsiDirectoryNode" />
+              <item name="MintedCappedCrowdsale" type="462c0819:PsiDirectoryNode" />
             </path>
             <path>
               <item name="auth-os-applications" type="b2602c69:ProjectViewProjectNode" />
               <item name="auth-os-applications" type="462c0819:PsiDirectoryNode" />
               <item name="TokenWizard" type="462c0819:PsiDirectoryNode" />
               <item name="crowdsale" type="462c0819:PsiDirectoryNode" />
-              <item name="DutchCrowdsale" type="462c0819:PsiDirectoryNode" />
+              <item name="MintedCappedCrowdsale" type="462c0819:PsiDirectoryNode" />
               <item name="test" type="462c0819:PsiDirectoryNode" />
             </path>
           </expand>
@@ -218,16 +217,15 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1534177214312</updated>
-      <workItem from="1534177216356" duration="674000" />
+      <workItem from="1534177216356" duration="1353000" />
     </task>
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="674000" />
+    <option name="totallyTimeSpent" value="1353000" />
   </component>
   <component name="ToolWindowManager">
     <frame x="163" y="23" width="1271" height="797" extended-state="0" />
-    <editor active="true" />
     <layout>
       <window_info id="Project" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" show_stripe_button="true" weight="0.2264" sideWeight="0.88659793" order="0" side_tool="false" content_ui="combo" />
       <window_info id="TODO" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.3283582" sideWeight="0.5" order="6" side_tool="false" content_ui="tabs" />
@@ -236,7 +234,7 @@
       <window_info id="Run" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.33" sideWeight="0.5" order="2" side_tool="false" content_ui="tabs" />
       <window_info id="Version Control" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.32889965" sideWeight="0.5" order="8" side_tool="false" content_ui="tabs" />
       <window_info id="Structure" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.24947146" sideWeight="0.4864865" order="1" side_tool="false" content_ui="tabs" />
-      <window_info id="Terminal" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" show_stripe_button="true" weight="0.13843888" sideWeight="0.5" order="9" side_tool="false" content_ui="tabs" />
+      <window_info id="Terminal" active="true" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="true" show_stripe_button="true" weight="0.4064801" sideWeight="0.5" order="9" side_tool="false" content_ui="tabs" />
       <window_info id="Debug" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.4" sideWeight="0.5" order="3" side_tool="false" content_ui="tabs" />
       <window_info id="Favorites" active="false" anchor="left" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.22692037" sideWeight="0.11340206" order="2" side_tool="true" content_ui="tabs" />
       <window_info id="Cvs" active="false" anchor="bottom" auto_hide="false" internal_type="DOCKED" type="DOCKED" visible="false" show_stripe_button="true" weight="0.25" sideWeight="0.5" order="4" side_tool="false" content_ui="tabs" />
@@ -266,7 +264,7 @@
       <breakpoints>
         <line-breakpoint enabled="true" type="javascript">
           <url>file://$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/sale_various_price.js</url>
-          <line>31</line>
+          <line>36</line>
           <properties lambdaOrdinal="-1" />
           <option name="timeStamp" value="1" />
         </line-breakpoint>
@@ -278,46 +276,68 @@
   <component name="editorHistoryManager">
     <entry file="file://$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/sale.js">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="418">
-          <caret line="13354" column="0" lean-forward="true" selection-start-line="0" selection-start-column="0" selection-end-line="13354" selection-end-column="0" />
-          <folding>
-            <element signature="e#942#71347#0" expanded="false" />
-            <element signature="e#71426#145300#0" expanded="false" />
-            <element signature="e#145402#288986#0" expanded="false" />
-            <element signature="e#289089#481727#0" expanded="false" />
-          </folding>
+        <state relative-caret-position="0">
+          <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
+          <folding />
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/sale_various_price.js">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="373">
-          <caret line="31" column="0" lean-forward="false" selection-start-line="31" selection-start-column="0" selection-end-line="31" selection-end-column="0" />
+        <state relative-caret-position="105">
+          <caret line="7" column="11" lean-forward="true" selection-start-line="7" selection-start-column="11" selection-end-line="7" selection-end-column="11" />
           <folding>
-            <element signature="e#957#128164#0" expanded="false" />
-            <element signature="e#128267#298272#0" expanded="false" />
+            <element signature="e#1115#128322#0" expanded="false" />
+            <element signature="e#128425#298430#0" expanded="false" />
           </folding>
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/sale_flat_price.js">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="418">
-          <caret line="2052" column="0" lean-forward="true" selection-start-line="2052" selection-start-column="0" selection-end-line="2052" selection-end-column="0" />
+        <state relative-caret-position="60">
+          <caret line="4" column="38" lean-forward="false" selection-start-line="4" selection-start-column="38" selection-end-line="4" selection-end-column="38" />
           <folding>
-            <element signature="e#934#66498#0" expanded="false" />
+            <element signature="e#1092#66656#0" expanded="false" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/TokenWizard/crowdsale/MintedCappedCrowdsale/test/sale.js">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="0">
+          <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
+          <folding>
+            <element signature="e#905#98145#0" expanded="false" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/TokenWizard/crowdsale/MintedCappedCrowdsale/test/sale_manager.js">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="-17">
+          <caret line="0" column="0" lean-forward="false" selection-start-line="0" selection-start-column="0" selection-end-line="0" selection-end-column="0" />
+          <folding>
+            <element signature="e#918#171100#0" expanded="false" />
           </folding>
         </state>
       </provider>
     </entry>
     <entry file="file://$PROJECT_DIR$/TokenWizard/crowdsale/DutchCrowdsale/test/sale_standart_price.js">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="478">
-          <caret line="13354" column="0" lean-forward="true" selection-start-line="13354" selection-start-column="0" selection-end-line="13354" selection-end-column="0" />
+        <state relative-caret-position="225">
+          <caret line="15" column="60" lean-forward="true" selection-start-line="15" selection-start-column="60" selection-end-line="15" selection-end-column="60" />
           <folding>
-            <element signature="e#256506#426511#0" expanded="false" />
-            <marker date="1534177894435" expanded="true" signature="405771:405775" ph="{...}" />
+            <element signature="e#1095#63609#0" expanded="false" />
           </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/.gitignore">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="90">
+          <caret line="6" column="1" lean-forward="false" selection-start-line="6" selection-start-column="1" selection-end-line="6" selection-end-column="1" />
+          <folding />
         </state>
       </provider>
     </entry>
