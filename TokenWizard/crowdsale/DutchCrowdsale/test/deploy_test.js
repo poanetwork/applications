@@ -1,3 +1,8 @@
+const chai = require('chai')
+const chaiAsPromised = require('chai-as-promised')
+chai.should()
+chai.use(chaiAsPromised)
+chai.use(require('chai-bignumber')());
 // Script exec and storage contracts
 let ScriptExec = artifacts.require('./RegistryExec')
 let AbstractStorage = artifacts.require('./AbstractStorage')

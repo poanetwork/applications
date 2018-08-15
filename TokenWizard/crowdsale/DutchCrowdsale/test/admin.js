@@ -1,3 +1,8 @@
+const chai = require('chai')
+const chaiAsPromised = require('chai-as-promised')
+chai.should()
+chai.use(chaiAsPromised)
+chai.use(require('chai-bignumber')());
 // Abstract storage contract
 let AbstractStorage = artifacts.require('./StorageMock')
 // Registry

@@ -3,4 +3,5 @@
 **/.node*
 **/flats/*
 !**/flats/.gitkeep
-**/*.env
+**/*.en
+.idea
