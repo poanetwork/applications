@@ -1,3 +1,4 @@
+const previouslyDeployed = require('./previously_deployed')
 let fs = require('fs')
 
 // Script exec and storage contracts
@@ -54,21 +55,31 @@ contract('DutchCrowdsale', function (accounts) {
   let appName = 'DutchCrowdsale'
 
   before(async () => {
-    storage = await AbstractStorage.new().should.be.fulfilled
+    storage = await AbstractStorage.at(previouslyDeployed.storage).should.be.fulfilled
+    console.log('storage was previously deployed', storage.address)
 
-    regUtil = await RegistryUtil.new().should.be.fulfilled
-    regProvider = await Provider.new().should.be.fulfilled
-    regIdx = await RegistryIdx.new().should.be.fulfilled
+    regUtil = await RegistryUtil.at(previouslyDeployed.regUtil).should.be.fulfilled
+    console.log('regUtil was previously deployed', regUtil.address)
+    regProvider = await Provider.at(previouslyDeployed.regProvider).should.be.fulfilled
+    console.log('regProvider was previously deployed', regProvider.address)
+    regIdx = await RegistryIdx.at(previouslyDeployed.regIdx).should.be.fulfilled
+    console.log('regIdx was previously deployed', regIdx.address)
 
     saleIdx = await DutchSale.new().should.be.fulfilled
+    console.log('saleIdx is deployed', saleIdx.address)
     token = await Token.new().should.be.fulfilled
+    console.log('token is deployed', token.address)
     sale = await Sale.new().should.be.fulfilled
+    console.log('sale is deployed', sale.address)
     admin = await Admin.new().should.be.fulfilled
+    console.log('admin is deployed', admin.address)
 
     saleUtils = await DutchUtils.new().should.be.fulfilled
+    console.log('saleUtils is deployed', saleUtils.address)
 
     saleSelectors = await saleUtils.getSelectors.call().should.be.fulfilled
     saleSelectors.length.should.be.eq(13)
+    console.log('saleSelectors are checked')
 
     saleAddrs = [
       // admin
@@ -82,30 +93,14 @@ contract('DutchCrowdsale', function (accounts) {
       token.address, token.address, token.address, token.address, token.address
     ]
     saleAddrs.length.should.be.eq(saleSelectors.length)
+    console.log('saleAddrs length is checked')
 
-    let events = await storage.createRegistry(
-      regIdx.address, regProvider.address, { from: exec }
-    ).should.be.fulfilled.then((tx) => {
-      return tx.logs
-    })
-    events.should.not.eq(null)
-    events.length.should.be.eq(1)
-    events[0].event.should.be.eq('ApplicationInitialized')
-    regExecID = events[0].args['execution_id']
-    web3.toDecimal(regExecID).should.not.eq(0)
+    regExecID = previouslyDeployed.regExecID
 
-    scriptExec = await ScriptExec.new().should.be.fulfilled
-    await scriptExec.configure(
-      execAdmin, storage.address, exec,
-      { from: execAdmin }
-    ).should.be.fulfilled
-    await scriptExec.setRegistryExecID(regExecID, { from: execAdmin }).should.be.fulfilled
+    scriptExec = await ScriptExec.at(previouslyDeployed.scriptExec).should.be.fulfilled
+    console.log('scriptExec was previously deployed', scriptExec.address)
     
-    //deploy proxies registry
-    let saleIdxMock = await DutchSale.new().should.be.fulfilled
-    proxiesRegistry = await ProxiesRegistry.new(storage.address, saleIdxMock.address, saleIdx.address).should.be.fulfilled
-
-    networkID = await web3.version.network
+    networkID = await web3.version.getNetwork
   })
 
   it.only('should correctly set up script exec', async () => {
@@ -137,9 +132,8 @@ contract('DutchCrowdsale', function (accounts) {
     envVarsContent += `${reactAppPrefix}${dutchPrefix}IDX${addrSuffix}='{"${networkID}":"${saleIdx.address}"}'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}CROWDSALE${addrSuffix}='{"${networkID}":"${sale.address}"}'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}TOKEN${addrSuffix}='{"${networkID}":"${token.address}"}'\n`
-    envVarsContent += `${reactAppPrefix}TW_PROXIES_REGISTRY${addrSuffix}='{"${networkID}":"${proxiesRegistry.address}"}'\n`
     envVarsContent += `${reactAppPrefix}PROXY_PROVIDER${addrSuffix}='{"${networkID}":"${exec}"}'\n`
-    envVarsContent += `${reactAppPrefix}REGISTRY_EXEC_ID='${regExecID}'\n`
+    envVarsContent += `${reactAppPrefix}REGISTRY_EXEC_ID='{"${networkID}":"${regExecID}"}'\n`
     envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}APP_NAME='MintedCappedCrowdsale'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}APP_NAME='DutchCrowdsale'\n`
     envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}APP_NAME_HASH='0x4d696e74656443617070656443726f776473616c650000000000000000000000'\n`

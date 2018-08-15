@@ -16,8 +16,6 @@ let MintedCapped = artifacts.require('./MintedCappedIdx')
 // Util
 let MintedCappedUtils = artifacts.require('./MintedCappedUtils')
 
-let ProxiesRegistry = artifacts.require('./TokenWizardProxiesRegistry')
-
 function hexStrEquals(hex, expected) {
   return web3.toAscii(hex).substring(0, expected.length) == expected;
 }
@@ -51,28 +49,37 @@ contract('MintedCappedCrowdsale', function (accounts) {
   let tokenManager
   let saleManager
 
-  let proxiesRegistry
-
   let appName = 'MintedCappedCrowdsale'
-  let verName = 'v0.0.1'
+  let verName = 'v1.0.0'
 
   before(async () => {
     storage = await AbstractStorage.new().should.be.fulfilled
+    console.log('storage is deployed', storage.address)
 
     regUtil = await RegistryUtil.new().should.be.fulfilled
+    console.log('regUtil is deployed', regUtil.address)
     regProvider = await Provider.new().should.be.fulfilled
+    console.log('regProvider is deployed', regProvider.address)
     regIdx = await RegistryIdx.new().should.be.fulfilled
+    console.log('regIdx is deployed', regIdx.address)
 
     saleIdx = await MintedCapped.new().should.be.fulfilled
+    console.log('saleIdx is deployed', saleIdx.address)
     token = await Token.new().should.be.fulfilled
+    console.log('token is deployed', token.address)
     sale = await Sale.new().should.be.fulfilled
+    console.log('sale is deployed', sale.address)
     tokenManager = await TokenManager.new().should.be.fulfilled
+    console.log('tokenManager is deployed', tokenManager.address)
     saleManager = await SaleManager.new().should.be.fulfilled
+    console.log('saleManager is deployed', saleManager.address)
 
     saleUtils = await MintedCappedUtils.new().should.be.fulfilled
+    console.log('saleUtils is deployed', saleUtils.address)
 
     saleSelectors = await saleUtils.getSelectors.call().should.be.fulfilled
     saleSelectors.length.should.be.eq(19)
+    console.log('saleSelectors are checked')
 
     saleAddrs = [
       saleManager.address, saleManager.address, saleManager.address,
@@ -87,30 +94,32 @@ contract('MintedCappedCrowdsale', function (accounts) {
       token.address, token.address, token.address, token.address, token.address
     ]
     saleAddrs.length.should.be.eq(saleSelectors.length)
+    console.log('saleAddrs length is checked')
 
     let events = await storage.createRegistry(
       regIdx.address, regProvider.address, { from: exec }
     ).should.be.fulfilled.then((tx) => {
       return tx.logs
     })
+    console.log('createRegistry is called')
     events.should.not.eq(null)
     events.length.should.be.eq(1)
     events[0].event.should.be.eq('ApplicationInitialized')
     regExecID = events[0].args['execution_id']
     web3.toDecimal(regExecID).should.not.eq(0)
+    console.log('regExecID is checked')
 
     scriptExec = await ScriptExec.new().should.be.fulfilled
+    console.log('scriptExec is deployed', scriptExec.address)
     await scriptExec.configure(
       execAdmin, storage.address, exec,
       { from: execAdmin }
     ).should.be.fulfilled
+    console.log('scriptExec is configured')
     await scriptExec.setRegistryExecID(regExecID, { from: execAdmin }).should.be.fulfilled
+    console.log('setRegistryExecID is called')
 
-    //deploy proxies registry
-    let saleIdxMock = await MintedCapped.new().should.be.fulfilled
-    proxiesRegistry = await ProxiesRegistry.new(storage.address, saleIdx.address, saleIdxMock.address).should.be.fulfilled
-
-    networkID = await web3.version.network
+    networkID = await web3.version.getNetwork
   })
 
   it.only('should correctly set up script exec', async () => {
@@ -142,7 +151,6 @@ contract('MintedCappedCrowdsale', function (accounts) {
     envVarsContent += `${reactAppPrefix}${dutchPrefix}IDX${addrSuffix}='{"${networkID}":"0x0"}'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}CROWDSALE${addrSuffix}='{"${networkID}":"0x0"}'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}TOKEN${addrSuffix}='{"${networkID}":"0x0"}'\n`
-    envVarsContent += `${reactAppPrefix}TW_PROXIES_REGISTRY${addrSuffix}='{"${networkID}":"${proxiesRegistry.address}"}'\n`
     envVarsContent += `${reactAppPrefix}PROXY_PROVIDER${addrSuffix}='{"${networkID}":"${exec}"}'\n`
     envVarsContent += `${reactAppPrefix}REGISTRY_EXEC_ID='${regExecID}'\n`
     envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}APP_NAME='MintedCappedCrowdsale'\n`
