@@ -1,18 +1,18 @@
 let fs = require('fs')
 
-// Abstract storage contract
-let AbstractStorage = artifacts.require('./AbstractStorage')
+// Script exec and storage contracts
 let ScriptExec = artifacts.require('./RegistryExec')
+let AbstractStorage = artifacts.require('./AbstractStorage')
+// Registry
+let RegistryUtil = artifacts.require('./RegistryUtil')
+let RegistryIdx = artifacts.require('./RegistryIdx')
+let Provider = artifacts.require('./Provider')
 // MintedCappedCrowdsale
 let Token = artifacts.require('./Token')
 let Sale = artifacts.require('./Sale')
 let TokenManager = artifacts.require('./TokenManager')
 let SaleManager = artifacts.require('./SaleManager')
 let MintedCapped = artifacts.require('./MintedCappedIdx')
-// Registry
-let RegistryUtil = artifacts.require('./RegistryUtil')
-let RegistryIdx = artifacts.require('./RegistryIdx')
-let Provider = artifacts.require('./Provider')
 // Util
 let MintedCappedUtils = artifacts.require('./MintedCappedUtils')
 
