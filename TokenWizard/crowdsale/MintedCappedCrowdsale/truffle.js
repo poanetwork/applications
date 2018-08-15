@@ -1,6 +1,7 @@
 const HDWalletProvider = require("truffle-hdwallet-provider-privkey");
 const privKeys = require('../pwd.js') // private keys
 const SokolProvider = new HDWalletProvider(privKeys, "https://sokol.poa.network/");
+const KovanProvider = new HDWalletProvider(privKeys, "https://kovan.infura.io/");
 
 module.exports = {
   networks: {
@@ -15,6 +16,12 @@ module.exports = {
         return SokolProvider
       },
       network_id: '77',
+    },
+    kovan: {
+      provider: function() {
+        return KovanProvider
+      },
+      network_id: '42',
     }
   },
   solc: {

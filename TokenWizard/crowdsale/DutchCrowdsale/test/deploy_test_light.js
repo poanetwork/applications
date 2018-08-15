@@ -100,7 +100,11 @@ contract('DutchCrowdsale', function (accounts) {
     scriptExec = await ScriptExec.at(previouslyDeployed.scriptExec).should.be.fulfilled
     console.log('scriptExec was previously deployed', scriptExec.address)
     
-    networkID = await web3.version.getNetwork
+    networkID = await new Promise((resolve, reject) => {
+      web3.version.getNetwork((err, netID) => {
+        resolve(netID)
+      })
+    })
   })
 
   it.only('should correctly set up script exec', async () => {

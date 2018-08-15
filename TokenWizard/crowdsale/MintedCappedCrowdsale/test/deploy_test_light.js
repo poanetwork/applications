@@ -119,7 +119,11 @@ contract('MintedCappedCrowdsale', function (accounts) {
     await scriptExec.setRegistryExecID(regExecID, { from: execAdmin }).should.be.fulfilled
     console.log('setRegistryExecID is called')
 
-    networkID = await web3.version.getNetwork
+    networkID = await new Promise((resolve, reject) => {
+      web3.version.getNetwork((err, netID) => {
+        resolve(netID)
+      })
+    })
   })
 
   it.only('should correctly set up script exec', async () => {
@@ -152,7 +156,7 @@ contract('MintedCappedCrowdsale', function (accounts) {
     envVarsContent += `${reactAppPrefix}${dutchPrefix}CROWDSALE${addrSuffix}='{"${networkID}":"0x0"}'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}TOKEN${addrSuffix}='{"${networkID}":"0x0"}'\n`
     envVarsContent += `${reactAppPrefix}PROXY_PROVIDER${addrSuffix}='{"${networkID}":"${exec}"}'\n`
-    envVarsContent += `${reactAppPrefix}REGISTRY_EXEC_ID='${regExecID}'\n`
+    envVarsContent += `${reactAppPrefix}REGISTRY_EXEC_ID='{"${networkID}":"${regExecID}"}'\n`
     envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}APP_NAME='MintedCappedCrowdsale'\n`
     envVarsContent += `${reactAppPrefix}${dutchPrefix}APP_NAME='DutchCrowdsale'\n`
     envVarsContent += `${reactAppPrefix}${mintedCappedPrefix}APP_NAME_HASH='0x4d696e74656443617070656443726f776473616c650000000000000000000000'\n`
