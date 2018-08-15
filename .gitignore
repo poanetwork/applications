@@ -7,4 +7,5 @@
 **/.env
 **/previously_deployed.js
 **/pwd.js
+**/*.en
 .idea
