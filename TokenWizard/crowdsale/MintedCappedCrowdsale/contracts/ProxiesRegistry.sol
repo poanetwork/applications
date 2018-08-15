@@ -39,6 +39,9 @@ contract TokenWizardProxiesRegistry is Ownable {
       dutchIdxAddr = _dutchIdx;
   }
 
+  function renounceOwnership() public onlyOwner {
+  }
+
   function changeAbstractStorage(address newAbstractStorageAddr) public onlyOwner {
     abstractStorageAddr = newAbstractStorageAddr;
   }
